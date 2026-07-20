@@ -3,6 +3,7 @@
 <a href="https://codeberg.org/ctietze/timeline-ui"><img src="https://img.shields.io/badge/Codeberg-canonical-2185D0?logo=codeberg" alt="Codeberg"></a>
 <img src="https://img.shields.io/badge/Swift-6.2-F05138?logo=swift&logoColor=white" alt="Swift 6.2">
 <img src="https://img.shields.io/badge/iOS-26%2B-000000?logo=apple&logoColor=white" alt="iOS 26+">
+<img src="https://img.shields.io/badge/macOS-15%2B-000000?logo=apple&logoColor=white" alt="macOS 15+">
 
 A SwiftUI component library for displaying calendar timeline views in iOS apps. Show daily schedules on an hour grid with automatic layout for overlapping events.
 
@@ -54,6 +55,16 @@ Full day timeline that automatically expands to fill available space. Shows hour
 
 ```swift
 DayTimelineView(items: [TimelineItem])
+```
+
+### ZoomableDayTimelineView
+
+Full day timeline with pinch-to-zoom on the hour grid. Unlike `DayTimelineView`, it always
+lays out the full 24-hour day inside a scroll view and lets the user pinch (or trackpad-pinch
+on macOS) to change the vertical scale — the hour under the zoom stays centered on screen.
+
+```swift
+ZoomableDayTimelineView(items: [TimelineItem])
 ```
 
 ### CompactTimelineView
@@ -136,11 +147,14 @@ AccessPromptView(
 | **Day** - Full schedule with hour grid | ![Day light](screenshots/day-simple-light.png) | ![Day dark](screenshots/day-simple-dark.png) |
 | **Overlapping** - Events arranged side-by-side | ![Overlapping light](screenshots/day-conflicts-light.png) | ![Overlapping dark](screenshots/day-conflicts-dark.png) |
 | **Many events** - Handles busy schedules gracefully | ![Many light](screenshots/compact-many-light.png) | ![Many dark](screenshots/compact-many-dark.png) |
+| **Zoomable day** - Default pinch-zoom level | ![Zoomable day default light](screenshots/zoomable-day-default-light.png) | ![Zoomable day default dark](screenshots/zoomable-day-default-dark.png) |
+| **Zoomable day** - Zoomed out to fit the whole day | ![Zoomable day zoomed out light](screenshots/zoomable-day-zoomed-out-light.png) | ![Zoomable day zoomed out dark](screenshots/zoomable-day-zoomed-out-dark.png) |
 | **Access restricted** - Blurred with permission prompt | ![Restricted light](screenshots/access-restricted-light.png) | ![Restricted dark](screenshots/access-restricted-dark.png) |
 
 ## Requirements
 
 - iOS 26+
+- macOS 15+
 - Swift 6.2+
 
 ## License

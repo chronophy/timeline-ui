@@ -117,7 +117,7 @@ public struct DayTimelineView: View {
 				ZStack(alignment: .topLeading) {
 					hourLines(hours: hours, contentWidth: contentWidth)
 
-					ForEach(buildEventLayout()) { layoutItem in
+					ForEach(TimelineEventLayout.build(items: timedItems)) { layoutItem in
 						TimelineEventBlock(
 							item: layoutItem.item,
 							column: layoutItem.column,
@@ -134,43 +134,6 @@ public struct DayTimelineView: View {
 			}
 			.padding(.vertical, 8)
 		}
-	}
-
-	private struct LayoutItem: Identifiable {
-		let id: UUID
-		let item: TimelineItem
-		var column: Int = 0
-		var totalColumns: Int = 1
-	}
-
-	private func buildEventLayout() -> [LayoutItem] {
-		var layoutItems = timedItems.map { LayoutItem(id: $0.id, item: $0) }
-		layoutItems.sort { $0.item.startDate < $1.item.startDate }
-
-		var columns: [[LayoutItem]] = []
-		for i in layoutItems.indices {
-			var placed = false
-			for colIndex in columns.indices {
-				guard let lastInColumn = columns[colIndex].last else { continue }
-				if layoutItems[i].item.startDate >= lastInColumn.item.endDate {
-					columns[colIndex].append(layoutItems[i])
-					layoutItems[i].column = colIndex
-					placed = true
-					break
-				}
-			}
-			if !placed {
-				layoutItems[i].column = columns.count
-				columns.append([layoutItems[i]])
-			}
-		}
-
-		let totalCols = max(columns.count, 1)
-		for i in layoutItems.indices {
-			layoutItems[i].totalColumns = totalCols
-		}
-
-		return layoutItems
 	}
 
 	private var allDaySection: some View {

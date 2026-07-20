@@ -21,9 +21,13 @@ mise run clean      # Clean build artifacts
 - **Package.swift** - Swift Package at root containing the library
 - **Sources/TimelineUI/** - Core library with timeline components
   - `TimelineItem.swift` - View model for timeline events
-  - `DayTimelineView.swift` - Full day timeline with hour grid
+  - `DayTimelineView.swift` - Full day timeline with hour grid, sized to fit available height (no scrolling)
+  - `ZoomableDayTimelineView.swift` - Full day timeline with pinch-to-zoom; always scrollable, fixed 24h range
   - `CompactTimelineView.swift` - Compact 2-3 hour preview
   - `TimelineEventBlock.swift` - Individual event block component
+  - `TimelineEventLayout.swift` - Shared column-layout algorithm for overlapping events
+  - `ExpandableTimelineContainer.swift` - Compact-to-full-day expand/collapse container
+  - `TimelineTransitionModifier.swift` - Matched geometry transition used by the expandable container
   - `AccessRestrictedModifier.swift` - Blur+overlay for restricted content
   - `AccessPromptView.swift` - Standard UI for requesting access
 - **Sources/TimelineUIEventKit/** - Optional EventKit integration
@@ -33,9 +37,13 @@ mise run clean      # Clean build artifacts
 
 ## Technical Constraints
 
-- Target: iOS 26+, macOS 14+
+- Target: iOS 26+, macOS 15+
 - Swift 6.2 with modern concurrency
-- SwiftUI only - no UIKit dependencies in core library
+- SwiftUI only - no UIKit/AppKit dependencies in core library. This rules out reading exact
+  gesture locations (e.g. pinch-center or two-finger trackpad-swipe position), since
+  `MagnificationGesture`/`DragGesture` don't expose them in pure SwiftUI - only
+  `UIPinchGestureRecognizer`/`NSMagnificationGestureRecognizer` do. Work around this with
+  SwiftUI-only approximations (see `ZoomAnchor`) rather than dropping into UIKit/AppKit interop.
 - TimelineUIEventKit links EventKit framework
 
 ## API Design

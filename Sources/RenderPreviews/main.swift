@@ -141,6 +141,7 @@ let allDayItems: [TimelineItem] = [
 
 enum ViewType {
 	case day
+	case zoomableDay(hourHeight: CGFloat, frameHeight: CGFloat)
 	case compact(HeightMode, height: CGFloat)
 }
 
@@ -149,6 +150,8 @@ let previewScenarios: [(name: String, items: [TimelineItem], viewType: ViewType)
 	("day-conflicts", conflictingItems, .day),
 	("day-with-allday", allDayItems, .day),
 	("day-many", manyItems, .day),
+	("zoomable-day-default", sampleItems, .zoomableDay(hourHeight: 60, frameHeight: 500)),
+	("zoomable-day-zoomed-out", sampleItems, .zoomableDay(hourHeight: 24, frameHeight: 620)),
 	("compact-simple", sampleItems, .compact(.fixed(hours: 2), height: 132)),
 	("compact-conflicts", conflictingItems, .compact(.fixed(hours: 2), height: 132)),
 	("compact-many", manyItems, .compact(.fixed(hours: 2), height: 132)),
@@ -192,6 +195,17 @@ func renderAllPreviews() {
 					.background(Color(nsColor: .windowBackgroundColor))
 			)
 			size = CGSize(width: 435, height: 572)
+		case .zoomableDay(let hourHeight, let frameHeight):
+			view = AnyView(
+				ZoomableDayTimelineView(items: items, initialHourHeight: hourHeight)
+					.frame(width: 375, height: frameHeight)
+					.padding(16)
+					.background(.background)
+					.clipShape(RoundedRectangle(cornerRadius: 16))
+					.padding(20)
+					.background(Color(nsColor: .windowBackgroundColor))
+			)
+			size = CGSize(width: 435, height: frameHeight + 72)
 		case .compact(let heightMode, let height):
 			view = AnyView(
 				CompactTimelineView(items: items, heightMode: heightMode)
@@ -289,6 +303,21 @@ func accessControlPreviews() -> [(name: String, view: AnyView, size: CGSize)] {
 func renderView<V: View>(_ view: V, size: CGSize) -> NSImage? {
 	let hostingView = NSHostingView(rootView: view)
 	hostingView.frame = CGRect(origin: .zero, size: size)
+
+	let window = NSWindow(
+		contentRect: hostingView.frame,
+		styleMask: [.borderless],
+		backing: .buffered,
+		defer: false
+	)
+	window.contentView = hostingView
+	window.setIsVisible(false)
+
+	// Views with `.onAppear`-driven state (e.g. scrolling to an initial position) need a few
+	// run loop turns for SwiftUI's async update cycle to apply that state before we capture a bitmap.
+	for _ in 0..<5 {
+		RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+	}
 
 	let bitmapRep = hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds)
 	guard let rep = bitmapRep else { return nil }
