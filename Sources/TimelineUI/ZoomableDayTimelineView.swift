@@ -37,7 +37,7 @@ public struct ZoomableDayTimelineView: View {
 	/// Called when the user taps an event block, with the tapped item.
 	public let onSelect: ((TimelineItem) -> Void)?
 
-	/// Creates a zoomable day timeline view.
+	/// Creates a zoomable day timeline view that manages its own zoom level internally.
 	///
 	/// - Parameters:
 	///   - items: The events to display. Pass an empty array to show just the hour grid.
@@ -54,7 +54,8 @@ public struct ZoomableDayTimelineView: View {
 	) {
 		self.items = items
 		self.onSelect = onSelect
-		_hourHeight = State(
+		self.externalHourHeight = nil
+		_internalHourHeight = State(
 			initialValue: ZoomAnchor.clampedHourHeight(
 				base: initialHourHeight,
 				gestureScale: 1,
@@ -64,15 +65,51 @@ public struct ZoomableDayTimelineView: View {
 		)
 	}
 
-	@State private var hourHeight: CGFloat
+	/// Creates a zoomable day timeline view whose zoom level is externally owned.
+	///
+	/// Use this when a host view needs the zoom level to survive this view being recreated —
+	/// e.g. ``WeekTimelineView`` uses it so the zoom level stays the same when paging between days.
+	///
+	/// - Parameters:
+	///   - items: The events to display. Pass an empty array to show just the hour grid.
+	///     The view scrolls to the first event's time, or the current time if no events are provided.
+	///   - hourHeight: The vertical scale (points per hour), owned by the caller. Pinching
+	///     updates it live; the caller is responsible for persisting it across this view's lifetime.
+	///   - onSelect: Called with the tapped item when the user taps an event block. Defaults to `nil`,
+	///     which leaves event blocks non-interactive.
+	public init(
+		items: [TimelineItem],
+		hourHeight: Binding<CGFloat>,
+		onSelect: ((TimelineItem) -> Void)? = nil
+	) {
+		self.items = items
+		self.onSelect = onSelect
+		self.externalHourHeight = hourHeight
+		_internalHourHeight = State(initialValue: hourHeight.wrappedValue)
+	}
+
+	@State private var internalHourHeight: CGFloat
+	private let externalHourHeight: Binding<CGFloat>?
+
+	private var hourHeight: CGFloat {
+		get { externalHourHeight?.wrappedValue ?? internalHourHeight }
+		nonmutating set {
+			if let externalHourHeight {
+				externalHourHeight.wrappedValue = newValue
+			} else {
+				internalHourHeight = newValue
+			}
+		}
+	}
+
 	@State private var activeAnchorHour: CGFloat?
 	@State private var scrollOffsetY: CGFloat = 0
 	@State private var scrollPosition = ScrollPosition()
 	@State private var hasScrolledToInitialPosition = false
 	@GestureState private var pinchScale: CGFloat = 1
 
-	private static let minHourHeight: CGFloat = 24
-	private static let maxHourHeight: CGFloat = 200
+	static let minHourHeight: CGFloat = 24
+	static let maxHourHeight: CGFloat = 200
 	private let labelWidth: CGFloat = 48
 	private let hours = Array(0...23)
 

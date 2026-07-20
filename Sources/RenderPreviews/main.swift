@@ -142,8 +142,19 @@ let allDayItems: [TimelineItem] = [
 enum ViewType {
 	case day
 	case zoomableDay(hourHeight: CGFloat, frameHeight: CGFloat)
+	case weekStrip(selectedDate: Date, calendar: Calendar)
+	case weekTimeline(selectedDate: Date, calendar: Calendar)
 	case compact(HeightMode, height: CGFloat)
 }
+
+let weekPreviewSelectedDate = makeDate(hour: 12, minute: 0)
+
+let frenchMondayFirstCalendar: Calendar = {
+	var calendar = Calendar(identifier: .gregorian)
+	calendar.locale = Locale(identifier: "fr_FR")
+	calendar.firstWeekday = 2
+	return calendar
+}()
 
 let previewScenarios: [(name: String, items: [TimelineItem], viewType: ViewType)] = [
 	("day-simple", sampleItems, .day),
@@ -152,6 +163,12 @@ let previewScenarios: [(name: String, items: [TimelineItem], viewType: ViewType)
 	("day-many", manyItems, .day),
 	("zoomable-day-default", sampleItems, .zoomableDay(hourHeight: 60, frameHeight: 500)),
 	("zoomable-day-zoomed-out", sampleItems, .zoomableDay(hourHeight: 24, frameHeight: 620)),
+	("week-strip-default", [], .weekStrip(selectedDate: weekPreviewSelectedDate, calendar: .current)),
+	(
+		"week-strip-locale-fr", [],
+		.weekStrip(selectedDate: weekPreviewSelectedDate, calendar: frenchMondayFirstCalendar)
+	),
+	("week-timeline-default", sampleItems, .weekTimeline(selectedDate: weekPreviewSelectedDate, calendar: .current)),
 	("compact-simple", sampleItems, .compact(.fixed(hours: 2), height: 132)),
 	("compact-conflicts", conflictingItems, .compact(.fixed(hours: 2), height: 132)),
 	("compact-many", manyItems, .compact(.fixed(hours: 2), height: 132)),
@@ -206,6 +223,28 @@ func renderAllPreviews() {
 					.background(Color(nsColor: .windowBackgroundColor))
 			)
 			size = CGSize(width: 435, height: frameHeight + 72)
+		case .weekStrip(let selectedDate, let calendar):
+			view = AnyView(
+				WeekStripView(selectedDate: .constant(selectedDate), calendar: calendar)
+					.frame(width: 375)
+					.padding(16)
+					.background(.background)
+					.clipShape(RoundedRectangle(cornerRadius: 16))
+					.padding(20)
+					.background(Color(nsColor: .windowBackgroundColor))
+			)
+			size = CGSize(width: 435, height: 150)
+		case .weekTimeline(let selectedDate, let calendar):
+			view = AnyView(
+				WeekTimelineView(items: items, selectedDate: .constant(selectedDate), calendar: calendar)
+					.frame(width: 375, height: 500)
+					.padding(16)
+					.background(.background)
+					.clipShape(RoundedRectangle(cornerRadius: 16))
+					.padding(20)
+					.background(Color(nsColor: .windowBackgroundColor))
+			)
+			size = CGSize(width: 435, height: 572)
 		case .compact(let heightMode, let height):
 			view = AnyView(
 				CompactTimelineView(items: items, heightMode: heightMode)

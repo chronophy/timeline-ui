@@ -26,6 +26,8 @@ mise run clean      # Clean build artifacts
   - `CompactTimelineView.swift` - Compact 2-3 hour preview
   - `TimelineEventBlock.swift` - Individual event block component
   - `TimelineEventLayout.swift` - Shared column-layout algorithm for overlapping events
+  - `WeekStripView.swift` - Locale-aware 7-day week strip toolbar (swipe/chevron week navigation)
+  - `WeekTimelineView.swift` - `WeekStripView` pinned above a `ZoomableDayTimelineView`
   - `ExpandableTimelineContainer.swift` - Compact-to-full-day expand/collapse container
   - `TimelineTransitionModifier.swift` - Matched geometry transition used by the expandable container
   - `AccessRestrictedModifier.swift` - Blur+overlay for restricted content
@@ -96,3 +98,14 @@ let items = ekEvents.asTimelineItems(primaryEventID: selectedEvent.eventIdentifi
   ```
 - Do not add comments unless asked
 - After modifying UI components, run `mise run previews` to regenerate preview images
+- Extract pure, testable math into a small `enum` colocated in the same file as the view that
+  uses it (e.g. `ZoomAnchor` in `ZoomableDayTimelineView.swift`, `WeekDateMath` in
+  `WeekStripView.swift`) instead of embedding it in view code - keeps gesture/layout math
+  covered by Swift Testing without needing to render views
+- Views take data already scoped/filtered by the host app (e.g. `items` for just the selected
+  day) and expose interaction via stateless closures (`onSelect`) or `Binding`s (`selectedDate`)
+  rather than fetching or filtering data themselves
+- `Sources/RenderPreviews/main.swift`'s `renderView` attaches the `NSHostingView` to a real,
+  hidden `NSWindow` and pumps the run loop briefly before capturing a bitmap - required for
+  previewing views with `.onAppear`-driven state (e.g. initial scroll position). A bare
+  `NSHostingView` never gets a chance to run that state update before the snapshot is taken

@@ -105,6 +105,30 @@ CompactTimelineView(items: items, heightMode: .fixed(hours: 2))
 }
 ```
 
+### Week Strip Toolbar
+
+A locale-aware 7-day week strip with single-letter weekday headers and the selected day
+highlighted, similar to Apple Calendar's day-view header. Swipe (or click-drag on macOS) and
+the chevron buttons page between weeks; tapping a day selects it. The weekday letters and
+first day of the week both follow the given `Calendar`'s locale — a Monday-first locale shows
+`M T W T F S S`, a Sunday-first locale shows `S M T W T F S`:
+
+![Week strip, French locale](screenshots/week-strip-locale-fr-light.png)
+
+```swift
+@State private var selectedDate = Date()
+
+WeekStripView(selectedDate: $selectedDate)
+```
+
+Pair it with a scrollable day timeline via `WeekTimelineView`, which pins the week strip above
+a `ZoomableDayTimelineView` and coordinates the selection between them. Supply `items` already
+filtered to `selectedDate`, and update them whenever the binding changes:
+
+```swift
+WeekTimelineView(items: eventsForSelectedDay, selectedDate: $selectedDate)
+```
+
 ### Access Restricted View
 
 Show a blurred timeline with a permission prompt when calendar access hasn't been granted:
@@ -149,6 +173,8 @@ AccessPromptView(
 | **Many events** - Handles busy schedules gracefully | ![Many light](screenshots/compact-many-light.png) | ![Many dark](screenshots/compact-many-dark.png) |
 | **Zoomable day** - Default pinch-zoom level | ![Zoomable day default light](screenshots/zoomable-day-default-light.png) | ![Zoomable day default dark](screenshots/zoomable-day-default-dark.png) |
 | **Zoomable day** - Zoomed out to fit the whole day | ![Zoomable day zoomed out light](screenshots/zoomable-day-zoomed-out-light.png) | ![Zoomable day zoomed out dark](screenshots/zoomable-day-zoomed-out-dark.png) |
+| **Week strip** - Locale-aware toolbar with swipe/chevron navigation | ![Week strip light](screenshots/week-strip-default-light.png) | ![Week strip dark](screenshots/week-strip-default-dark.png) |
+| **Week timeline** - Week strip pinned above a zoomable day timeline | ![Week timeline light](screenshots/week-timeline-default-light.png) | ![Week timeline dark](screenshots/week-timeline-default-dark.png) |
 | **Access restricted** - Blurred with permission prompt | ![Restricted light](screenshots/access-restricted-light.png) | ![Restricted dark](screenshots/access-restricted-dark.png) |
 
 ## Requirements
