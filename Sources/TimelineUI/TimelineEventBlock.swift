@@ -9,6 +9,7 @@ struct TimelineEventBlock: View {
 	let baseDate: Date
 	let labelWidth: CGFloat
 	let contentWidth: CGFloat
+	let onSelect: ((TimelineItem) -> Void)?
 
 	private var yOffset: CGFloat {
 		let calendar = Calendar.current
@@ -59,6 +60,13 @@ struct TimelineEventBlock: View {
 		.frame(width: blockWidth - 2, height: blockHeight)
 		.background(item.isPrimary ? item.color.opacity(0.15) : item.color.opacity(0.2))
 		.clipShape(RoundedRectangle(cornerRadius: 4))
-		.offset(x: xOffset, y: yOffset)
+		.contentShape(Rectangle())
+		.onTapGesture {
+			onSelect?(item)
+		}
+		// `.position()` rather than `.offset()`: on macOS, `.offset()` can move
+		// a view's rendered position without moving its hit-testing region
+		// along with it, leaving tap gestures unresponsive at the visible spot.
+		.position(x: xOffset + (blockWidth - 2) / 2, y: yOffset + blockHeight / 2)
 	}
 }

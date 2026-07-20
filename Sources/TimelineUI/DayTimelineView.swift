@@ -30,12 +30,19 @@ public struct DayTimelineView: View {
 	/// The events to display on the timeline.
 	public let items: [TimelineItem]
 
+	/// Called when the user taps an event block, with the tapped item.
+	public let onSelect: ((TimelineItem) -> Void)?
+
 	/// Creates a day timeline view.
 	///
-	/// - Parameter items: The events to display. Pass an empty array to show just the hour grid.
-	///   The view centers on the first event's time, or the current time if no events are provided.
-	public init(items: [TimelineItem]) {
+	/// - Parameters:
+	///   - items: The events to display. Pass an empty array to show just the hour grid.
+	///     The view centers on the first event's time, or the current time if no events are provided.
+	///   - onSelect: Called with the tapped item when the user taps an event block. Defaults to `nil`,
+	///     which leaves event blocks non-interactive.
+	public init(items: [TimelineItem], onSelect: ((TimelineItem) -> Void)? = nil) {
 		self.items = items
+		self.onSelect = onSelect
 	}
 
 	private let hourHeight: CGFloat = 44
@@ -119,7 +126,8 @@ public struct DayTimelineView: View {
 							rangeStart: range.start,
 							baseDate: baseDate,
 							labelWidth: labelWidth,
-							contentWidth: contentWidth
+							contentWidth: contentWidth,
+							onSelect: onSelect
 						)
 					}
 				}
