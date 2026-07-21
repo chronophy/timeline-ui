@@ -321,7 +321,7 @@ public struct ZoomableDayTimelineView: View {
 						.frame(height: 1)
 						.frame(maxWidth: .infinity)
 				}
-				.frame(height: effectiveHourHeight)
+				.frame(height: effectiveHourHeight, alignment: .top)
 			}
 		}
 	}

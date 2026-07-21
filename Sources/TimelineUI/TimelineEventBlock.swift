@@ -1,5 +1,28 @@
 import SwiftUI
 
+/// Pure, testable math for converting a date into a vertical pixel offset on the hour grid.
+enum EventPositionMath {
+	/// The vertical offset of `date`, measured in hours-since-midnight of `referenceDate`'s
+	/// calendar day, minus `rangeStart` (the first hour shown), scaled by `hourHeight`.
+	///
+	/// Anchoring to `calendar.startOfDay(for:)` rather than `referenceDate`'s own `.hour`
+	/// component matters: the `.hour` component alone discards `referenceDate`'s minutes, and
+	/// re-deriving the offset from a raw `timeIntervalSince(referenceDate)` delta then leaks
+	/// those discarded minutes back in as a fixed error applied to every event on the timeline.
+	static func yOffset(
+		of date: Date,
+		referenceDate: Date,
+		rangeStart: Int,
+		hourHeight: CGFloat,
+		calendar: Calendar
+	) -> CGFloat {
+		let startOfDay = calendar.startOfDay(for: referenceDate)
+		let hoursSinceStartOfDay = date.timeIntervalSince(startOfDay) / 3600.0
+		let hoursFromRangeStart = hoursSinceStartOfDay - Double(rangeStart)
+		return CGFloat(hoursFromRangeStart) * hourHeight
+	}
+}
+
 /// Pure, testable math for drag-to-reschedule: adaptive snap granularity, and the
 /// resulting start/end dates for a move or resize gesture given a vertical translation.
 enum RescheduleMath {
@@ -135,12 +158,13 @@ struct TimelineEventBlock: View {
 	private var committedEndDate: Date { pendingReschedule?.end ?? item.endDate }
 
 	private var committedYOffset: CGFloat {
-		let calendar = Calendar.current
-		let baseHour = calendar.component(.hour, from: baseDate)
-		let hoursSinceBase = committedStartDate.timeIntervalSince(baseDate) / 3600.0
-		let actualHour = Double(baseHour) + hoursSinceBase
-		let hoursFromRangeStart = actualHour - Double(rangeStart)
-		return CGFloat(hoursFromRangeStart) * hourHeight
+		EventPositionMath.yOffset(
+			of: committedStartDate,
+			referenceDate: baseDate,
+			rangeStart: rangeStart,
+			hourHeight: hourHeight,
+			calendar: .current
+		)
 	}
 
 	private var committedBlockHeight: CGFloat {
