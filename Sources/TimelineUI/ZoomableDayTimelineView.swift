@@ -37,6 +37,11 @@ public struct ZoomableDayTimelineView: View {
 	/// Called when the user taps an event block, with the tapped item.
 	public let onSelect: ((TimelineItem) -> Void)?
 
+	/// Called when the user moves or resizes an item by dragging, with the rescheduled item.
+	/// Only items with `TimelineItem.isEditable == true` can be dragged; this is called
+	/// once per gesture, on release, not continuously while dragging.
+	public let onReschedule: ((TimelineItem) -> Void)?
+
 	/// Creates a zoomable day timeline view that manages its own zoom level internally.
 	///
 	/// - Parameters:
@@ -44,16 +49,20 @@ public struct ZoomableDayTimelineView: View {
 	///     The view scrolls to the first event's time, or the current time if no events are provided.
 	///   - onSelect: Called with the tapped item when the user taps an event block. Defaults to `nil`,
 	///     which leaves event blocks non-interactive.
+	///   - onReschedule: Called with the updated item when the user moves or resizes an editable
+	///     event block by dragging. Defaults to `nil`, which leaves event blocks non-draggable.
 	///   - initialHourHeight: The vertical scale (points per hour) to start at, before any pinching.
 	///     Clamped to the same range the pinch gesture allows. Defaults to `60`. Exposed mainly so
 	///     previews/tests/screenshots can pin a zoom level without simulating a gesture.
 	public init(
 		items: [TimelineItem],
 		onSelect: ((TimelineItem) -> Void)? = nil,
+		onReschedule: ((TimelineItem) -> Void)? = nil,
 		initialHourHeight: CGFloat = 60
 	) {
 		self.items = items
 		self.onSelect = onSelect
+		self.onReschedule = onReschedule
 		self.externalHourHeight = nil
 		_internalHourHeight = State(
 			initialValue: ZoomAnchor.clampedHourHeight(
@@ -77,13 +86,17 @@ public struct ZoomableDayTimelineView: View {
 	///     updates it live; the caller is responsible for persisting it across this view's lifetime.
 	///   - onSelect: Called with the tapped item when the user taps an event block. Defaults to `nil`,
 	///     which leaves event blocks non-interactive.
+	///   - onReschedule: Called with the updated item when the user moves or resizes an editable
+	///     event block by dragging. Defaults to `nil`, which leaves event blocks non-draggable.
 	public init(
 		items: [TimelineItem],
 		hourHeight: Binding<CGFloat>,
-		onSelect: ((TimelineItem) -> Void)? = nil
+		onSelect: ((TimelineItem) -> Void)? = nil,
+		onReschedule: ((TimelineItem) -> Void)? = nil
 	) {
 		self.items = items
 		self.onSelect = onSelect
+		self.onReschedule = onReschedule
 		self.externalHourHeight = hourHeight
 		_internalHourHeight = State(initialValue: hourHeight.wrappedValue)
 	}
@@ -106,6 +119,7 @@ public struct ZoomableDayTimelineView: View {
 	@State private var scrollOffsetY: CGFloat = 0
 	@State private var scrollPosition = ScrollPosition()
 	@State private var hasScrolledToInitialPosition = false
+	@State private var editingItemID: UUID?
 	@GestureState private var pinchScale: CGFloat = 1
 
 	static let minHourHeight: CGFloat = 24
@@ -120,6 +134,10 @@ public struct ZoomableDayTimelineView: View {
 			min: Self.minHourHeight,
 			max: Self.maxHourHeight
 		)
+	}
+
+	private func snapMinutes(viewportHeight: CGFloat) -> Int {
+		RescheduleMath.snapMinutes(visibleHours: viewportHeight / effectiveHourHeight)
 	}
 
 	private var baseDate: Date {
@@ -159,42 +177,68 @@ public struct ZoomableDayTimelineView: View {
 					allDaySection
 				}
 
-				ScrollView(.vertical) {
-					ZStack(alignment: .topLeading) {
-						hourLines(contentWidth: contentWidth)
+				let scrollableContent =
+					ScrollView(.vertical) {
+						ZStack(alignment: .topLeading) {
+							hourLines(contentWidth: contentWidth)
+								.contentShape(Rectangle())
+								.onTapGesture {
+									editingItemID = nil
+								}
 
-						ForEach(TimelineEventLayout.build(items: timedItems)) { layoutItem in
-							TimelineEventBlock(
-								item: layoutItem.item,
-								column: layoutItem.column,
-								totalColumns: layoutItem.totalColumns,
-								hourHeight: effectiveHourHeight,
-								rangeStart: 0,
-								baseDate: baseDate,
-								labelWidth: labelWidth,
-								contentWidth: contentWidth,
-								onSelect: onSelect
-							)
+							ForEach(TimelineEventLayout.build(items: timedItems)) { layoutItem in
+								TimelineEventBlock(
+									item: layoutItem.item,
+									column: layoutItem.column,
+									totalColumns: layoutItem.totalColumns,
+									hourHeight: effectiveHourHeight,
+									rangeStart: 0,
+									baseDate: baseDate,
+									labelWidth: labelWidth,
+									contentWidth: contentWidth,
+									onSelect: onSelect,
+									onReschedule: onReschedule,
+									snapMinutes: snapMinutes(viewportHeight: viewportHeight),
+									editingItemID: $editingItemID
+								)
+							}
 						}
+						.frame(height: effectiveHourHeight * 24)
 					}
-					.frame(height: effectiveHourHeight * 24)
-				}
-				.scrollPosition($scrollPosition)
-				.onScrollGeometryChange(for: CGFloat.self) { geometry in
-					geometry.contentOffset.y
-				} action: { _, newValue in
-					scrollOffsetY = newValue
-				}
-				.gesture(magnificationGesture(viewportHeight: viewportHeight))
-				.onAppear {
-					guard !hasScrolledToInitialPosition else { return }
-					hasScrolledToInitialPosition = true
-					let targetY = ZoomAnchor.scrollOffsetY(
-						forAnchorHour: initialAnchorHour(),
-						hourHeight: effectiveHourHeight,
-						viewportHeight: viewportHeight
-					)
-					scrollPosition.scrollTo(y: max(0, targetY))
+					.scrollPosition($scrollPosition)
+					.onScrollGeometryChange(for: CGFloat.self) { geometry in
+						geometry.contentOffset.y
+					} action: { _, newValue in
+						scrollOffsetY = newValue
+					}
+					// `.simultaneousGesture`, not `.highPriorityGesture`: high-priority gestures hold
+					// off delivering touches to descendants for as long as they might still
+					// succeed, and magnification can never conclusively rule out "this could still
+					// become a pinch" until the touch lifts (a second finger could join at any
+					// point) — so TimelineEventBlock's own drag-to-reschedule gestures (a
+					// descendant, since it's rendered inside this ScrollView) never got to run
+					// live, only resolving once the touch ended, regardless of the `including:`
+					// mask. `.simultaneousGesture` recognizes magnification alongside whatever else
+					// is happening instead of gating on it first.
+					.simultaneousGesture(magnificationGesture(viewportHeight: viewportHeight))
+					.onAppear {
+						guard !hasScrolledToInitialPosition else { return }
+						hasScrolledToInitialPosition = true
+						let targetY = ZoomAnchor.scrollOffsetY(
+							forAnchorHour: initialAnchorHour(),
+							hourHeight: effectiveHourHeight,
+							viewportHeight: viewportHeight
+						)
+						scrollPosition.scrollTo(y: max(0, targetY))
+					}
+
+				// `.scrollDisabled` is only *attached* while actually needed (a block is in edit
+				// mode), not just given a `false` value the rest of the time, so a host that never
+				// enters edit mode gets a ScrollView with this modifier never applied at all.
+				if editingItemID != nil {
+					scrollableContent.scrollDisabled(true)
+				} else {
+					scrollableContent
 				}
 			}
 			.padding(.vertical, 8)
@@ -310,9 +354,17 @@ public struct ZoomableDayTimelineView: View {
 			location: "Room 101",
 			isPrimary: false
 		),
+		TimelineItem(
+			title: "All day event",
+			startDate: Calendar.current.date(bySettingHour: 0, minute: 0, second: 0, of: Date())!,
+			endDate: Calendar.current.date(bySettingHour: 23, minute: 59, second: 0, of: Date())!,
+			color: .blue,
+			location: "Conference Room A",
+			isPrimary: false
+		),
 	]
 
-	return ZoomableDayTimelineView(items: items)
+	ZoomableDayTimelineView(items: items)
 		.frame(height: 500)
 		.padding()
 }

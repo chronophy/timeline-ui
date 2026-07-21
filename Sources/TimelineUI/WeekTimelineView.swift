@@ -29,6 +29,10 @@ public struct WeekTimelineView: View {
 	/// Called when the user taps an event block, with the tapped item.
 	public let onSelect: ((TimelineItem) -> Void)?
 
+	/// Called when the user moves or resizes an item by dragging, with the rescheduled item.
+	/// Only items with `TimelineItem.isEditable == true` can be dragged.
+	public let onReschedule: ((TimelineItem) -> Void)?
+
 	let calendar: Calendar
 
 	@State private var internalHourHeight: CGFloat
@@ -48,6 +52,8 @@ public struct WeekTimelineView: View {
 	///     swipes, or uses the chevron buttons in the week strip.
 	///   - onSelect: Called with the tapped item when the user taps an event block. Defaults
 	///     to `nil`, which leaves event blocks non-interactive.
+	///   - onReschedule: Called with the updated item when the user moves or resizes an editable
+	///     event block by dragging. Defaults to `nil`, which leaves event blocks non-draggable.
 	///   - initialHourHeight: The vertical scale (points per hour) the timeline starts at,
 	///     before any pinching. Defaults to `60`.
 	///   - calendar: The calendar used by the week strip to determine week boundaries,
@@ -56,12 +62,14 @@ public struct WeekTimelineView: View {
 		items: [TimelineItem],
 		selectedDate: Binding<Date>,
 		onSelect: ((TimelineItem) -> Void)? = nil,
+		onReschedule: ((TimelineItem) -> Void)? = nil,
 		initialHourHeight: CGFloat = 60,
 		calendar: Calendar = .current
 	) {
 		self.items = items
 		self._selectedDate = selectedDate
 		self.onSelect = onSelect
+		self.onReschedule = onReschedule
 		self.calendar = calendar
 		self.externalHourHeight = nil
 		_internalHourHeight = State(
@@ -89,6 +97,8 @@ public struct WeekTimelineView: View {
 	///     updates it live; the caller is responsible for persisting it.
 	///   - onSelect: Called with the tapped item when the user taps an event block. Defaults
 	///     to `nil`, which leaves event blocks non-interactive.
+	///   - onReschedule: Called with the updated item when the user moves or resizes an editable
+	///     event block by dragging. Defaults to `nil`, which leaves event blocks non-draggable.
 	///   - calendar: The calendar used by the week strip to determine week boundaries,
 	///     weekday order, and weekday symbols. Defaults to `Calendar.current`.
 	public init(
@@ -96,11 +106,13 @@ public struct WeekTimelineView: View {
 		selectedDate: Binding<Date>,
 		hourHeight: Binding<CGFloat>,
 		onSelect: ((TimelineItem) -> Void)? = nil,
+		onReschedule: ((TimelineItem) -> Void)? = nil,
 		calendar: Calendar = .current
 	) {
 		self.items = items
 		self._selectedDate = selectedDate
 		self.onSelect = onSelect
+		self.onReschedule = onReschedule
 		self.calendar = calendar
 		self.externalHourHeight = hourHeight
 		_internalHourHeight = State(initialValue: hourHeight.wrappedValue)
@@ -112,7 +124,12 @@ public struct WeekTimelineView: View {
 
 			Divider()
 
-			ZoomableDayTimelineView(items: items, hourHeight: hourHeight, onSelect: onSelect)
+			ZoomableDayTimelineView(
+				items: items,
+				hourHeight: hourHeight,
+				onSelect: onSelect,
+				onReschedule: onReschedule
+			)
 		}
 	}
 }

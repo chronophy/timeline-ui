@@ -61,6 +61,12 @@ public struct TimelineItem: Identifiable, Sendable {
 	/// existing calendar events.
 	public let isPrimary: Bool
 
+	/// Whether this event can be moved or resized by dragging in ``ZoomableDayTimelineView``.
+	///
+	/// Defaults to `false` — items are read-only unless a caller explicitly opts in, since
+	/// not every event a host displays is necessarily backed by a writable data source.
+	public let isEditable: Bool
+
 	/// Creates a timeline item.
 	///
 	/// - Parameters:
@@ -72,6 +78,7 @@ public struct TimelineItem: Identifiable, Sendable {
 	///   - color: The accent color for the event block.
 	///   - location: An optional location string. Defaults to `nil`.
 	///   - isPrimary: Whether to highlight this as the primary event. Defaults to `false`.
+	///   - isEditable: Whether this event can be moved or resized by dragging. Defaults to `false`.
 	public init(
 		id: UUID = UUID(),
 		title: String,
@@ -80,7 +87,8 @@ public struct TimelineItem: Identifiable, Sendable {
 		isAllDay: Bool = false,
 		color: Color,
 		location: String? = nil,
-		isPrimary: Bool = false
+		isPrimary: Bool = false,
+		isEditable: Bool = false
 	) {
 		self.id = id
 		self.title = title
@@ -90,5 +98,23 @@ public struct TimelineItem: Identifiable, Sendable {
 		self.color = color
 		self.location = location
 		self.isPrimary = isPrimary
+		self.isEditable = isEditable
+	}
+}
+
+extension TimelineItem {
+	/// Returns a copy of this item with a new start and end date, preserving everything else.
+	public func rescheduled(startDate: Date, endDate: Date) -> TimelineItem {
+		TimelineItem(
+			id: id,
+			title: title,
+			startDate: startDate,
+			endDate: endDate,
+			isAllDay: isAllDay,
+			color: color,
+			location: location,
+			isPrimary: isPrimary,
+			isEditable: isEditable
+		)
 	}
 }

@@ -26,6 +26,14 @@ let sampleItems: [TimelineItem] = [
 		color: .purple,
 		isPrimary: false
 	),
+	TimelineItem(
+		title: "All day event",
+		startDate: makeDate(hour: 0, minute: 0),
+		endDate: makeDate(hour: 23, minute: 59),
+		isAllDay: true,
+		color: .red,
+		isPrimary: false
+	),
 ]
 
 let conflictingItems: [TimelineItem] = [
