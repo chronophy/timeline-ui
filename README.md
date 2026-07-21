@@ -1,3 +1,4 @@
+<!-- markdownlint-disable MD033 -->
 # TimelineUI
 
 <a href="https://codeberg.org/ctietze/timeline-ui"><img src="https://img.shields.io/badge/Codeberg-canonical-2185D0?logo=codeberg" alt="Codeberg"></a>
