@@ -130,6 +130,33 @@ filtered to `selectedDate`, and update them whenever the binding changes:
 WeekTimelineView(items: eventsForSelectedDay, selectedDate: $selectedDate)
 ```
 
+### Drag to Reschedule
+
+Events marked `isEditable: true` can be moved or resized by dragging in `ZoomableDayTimelineView`
+(and `WeekTimelineView`, which is built on it). On iOS, a long-press on the block enters edit
+mode; on macOS, a plain click does. While editing, resize handles appear on the block, and both
+the body (move) and either handle (resize) accept drags — snapped to a granularity (5/15/30/60
+minutes) that adapts to the current zoom level.
+
+```swift
+let items = [
+    TimelineItem(
+        title: "Team Meeting",
+        startDate: Date(),
+        endDate: Date().addingTimeInterval(3600),
+        color: .blue,
+        isEditable: true
+    )
+]
+
+ZoomableDayTimelineView(
+    items: items,
+    onReschedule: { updated in
+        // Persist updated.startDate / updated.endDate
+    }
+)
+```
+
 ### Access Restricted View
 
 Show a blurred timeline with a permission prompt when calendar access hasn't been granted:

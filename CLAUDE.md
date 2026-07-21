@@ -60,7 +60,8 @@ TimelineItem(
     isAllDay: Bool = false,
     color: Color,
     location: String? = nil,
-    isPrimary: Bool = false  // Distinguishes "new" from "existing" events
+    isPrimary: Bool = false,  // Distinguishes "new" from "existing" events
+    isEditable: Bool = false  // Allows drag-to-move/resize in ZoomableDayTimelineView
 )
 ```
 
@@ -90,6 +91,21 @@ let item = TimelineItem(ekEvent)
 let items = ekEvents.asTimelineItems(primaryEventID: selectedEvent.eventIdentifier)
 ```
 
+### Drag to Reschedule
+
+Items with `isEditable: true` can be moved or resized by dragging in `ZoomableDayTimelineView`
+(and `WeekTimelineView`, which is built on it). Supply `onReschedule` to receive the updated item
+when a drag ends:
+
+```swift
+ZoomableDayTimelineView(
+    items: items,
+    onReschedule: { updated in
+        // Persist updated.startDate / updated.endDate
+    }
+)
+```
+
 ## Coding Conventions
 
 - Use Swift Testing framework with raw identifiers for test names:
@@ -100,8 +116,9 @@ let items = ekEvents.asTimelineItems(primaryEventID: selectedEvent.eventIdentifi
 - After modifying UI components, run `mise run previews` to regenerate preview images
 - Extract pure, testable math into a small `enum` colocated in the same file as the view that
   uses it (e.g. `ZoomAnchor` in `ZoomableDayTimelineView.swift`, `WeekDateMath` in
-  `WeekStripView.swift`) instead of embedding it in view code - keeps gesture/layout math
-  covered by Swift Testing without needing to render views
+  `WeekStripView.swift`, `EventPositionMath`/`RescheduleMath` in `TimelineEventBlock.swift`)
+  instead of embedding it in view code - keeps gesture/layout math covered by Swift Testing
+  without needing to render views
 - Views take data already scoped/filtered by the host app (e.g. `items` for just the selected
   day) and expose interaction via stateless closures (`onSelect`) or `Binding`s (`selectedDate`)
   rather than fetching or filtering data themselves

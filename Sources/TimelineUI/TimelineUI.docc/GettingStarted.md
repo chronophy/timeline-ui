@@ -57,3 +57,42 @@ CompactTimelineView(items: events, heightMode: .fixed(hours: 2))
 The timeline automatically arranges overlapping events in columns:
 
 ![Many overlapping events](compact-many-light.png)
+
+## Zoom and Scroll a Full Day
+
+Use ``ZoomableDayTimelineView`` when you want the full 24-hour day in a scroll view, with
+pinch-to-zoom on the hour grid:
+
+```swift
+ZoomableDayTimelineView(items: events)
+    .frame(height: 500)
+```
+
+## Add Week Navigation
+
+Pair ``WeekStripView`` with a day timeline, or use ``WeekTimelineView`` to get both together.
+`WeekTimelineView` pins a locale-aware week strip above a ``ZoomableDayTimelineView`` and keeps
+the selected day in sync between them:
+
+```swift
+@State private var selectedDate = Date()
+
+WeekTimelineView(items: eventsForSelectedDay, selectedDate: $selectedDate)
+```
+
+Supply `items` already filtered to `selectedDate`, and update them whenever the binding changes.
+
+## Drag to Reschedule
+
+Mark an item ``TimelineItem/isEditable`` to let the user move or resize it by dragging in
+``ZoomableDayTimelineView`` (or ``WeekTimelineView``). Supply `onReschedule` to receive the
+updated item when a drag ends:
+
+```swift
+ZoomableDayTimelineView(
+    items: events,
+    onReschedule: { updated in
+        // Persist updated.startDate / updated.endDate
+    }
+)
+```
