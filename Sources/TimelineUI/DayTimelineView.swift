@@ -30,12 +30,19 @@ public struct DayTimelineView: View {
 	/// The events to display on the timeline.
 	public let items: [TimelineItem]
 
+	/// Called when the user taps an event block, with the tapped item.
+	public let onSelect: ((TimelineItem) -> Void)?
+
 	/// Creates a day timeline view.
 	///
-	/// - Parameter items: The events to display. Pass an empty array to show just the hour grid.
-	///   The view centers on the first event's time, or the current time if no events are provided.
-	public init(items: [TimelineItem]) {
+	/// - Parameters:
+	///   - items: The events to display. Pass an empty array to show just the hour grid.
+	///     The view centers on the first event's time, or the current time if no events are provided.
+	///   - onSelect: Called with the tapped item when the user taps an event block. Defaults to `nil`,
+	///     which leaves event blocks non-interactive.
+	public init(items: [TimelineItem], onSelect: ((TimelineItem) -> Void)? = nil) {
 		self.items = items
+		self.onSelect = onSelect
 	}
 
 	private let hourHeight: CGFloat = 44
@@ -110,7 +117,7 @@ public struct DayTimelineView: View {
 				ZStack(alignment: .topLeading) {
 					hourLines(hours: hours, contentWidth: contentWidth)
 
-					ForEach(buildEventLayout()) { layoutItem in
+					ForEach(TimelineEventLayout.build(items: timedItems)) { layoutItem in
 						TimelineEventBlock(
 							item: layoutItem.item,
 							column: layoutItem.column,
@@ -119,50 +126,20 @@ public struct DayTimelineView: View {
 							rangeStart: range.start,
 							baseDate: baseDate,
 							labelWidth: labelWidth,
-							contentWidth: contentWidth
+							contentWidth: contentWidth,
+							onSelect: onSelect,
+							onReschedule: nil,
+							onDelete: nil,
+							onEditStart: nil,
+							onEditEnd: nil,
+							snapMinutes: 60,
+							editingItemID: .constant(nil)
 						)
 					}
 				}
 			}
 			.padding(.vertical, 8)
 		}
-	}
-
-	private struct LayoutItem: Identifiable {
-		let id: UUID
-		let item: TimelineItem
-		var column: Int = 0
-		var totalColumns: Int = 1
-	}
-
-	private func buildEventLayout() -> [LayoutItem] {
-		var layoutItems = timedItems.map { LayoutItem(id: $0.id, item: $0) }
-		layoutItems.sort { $0.item.startDate < $1.item.startDate }
-
-		var columns: [[LayoutItem]] = []
-		for i in layoutItems.indices {
-			var placed = false
-			for colIndex in columns.indices {
-				guard let lastInColumn = columns[colIndex].last else { continue }
-				if layoutItems[i].item.startDate >= lastInColumn.item.endDate {
-					columns[colIndex].append(layoutItems[i])
-					layoutItems[i].column = colIndex
-					placed = true
-					break
-				}
-			}
-			if !placed {
-				layoutItems[i].column = columns.count
-				columns.append([layoutItems[i]])
-			}
-		}
-
-		let totalCols = max(columns.count, 1)
-		for i in layoutItems.indices {
-			layoutItems[i].totalColumns = totalCols
-		}
-
-		return layoutItems
 	}
 
 	private var allDaySection: some View {
@@ -203,7 +180,7 @@ public struct DayTimelineView: View {
 						.frame(height: 1)
 						.frame(maxWidth: .infinity)
 				}
-				.frame(height: hourHeight)
+				.frame(height: hourHeight, alignment: .top)
 			}
 		}
 	}
