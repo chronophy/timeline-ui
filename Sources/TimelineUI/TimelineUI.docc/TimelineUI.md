@@ -16,7 +16,8 @@ Use ``DayTimelineView`` for full-day schedules that expand to fill available spa
 ``CompactTimelineView`` for a focused 2-3 hour window ideal for widgets, or
 ``ZoomableDayTimelineView`` for a scrollable, pinch-to-zoom full day — pair it with
 ``WeekStripView`` (or the combined ``WeekTimelineView``) for week navigation. Items marked
-``TimelineItem/isEditable`` can be moved or resized by dragging in ``ZoomableDayTimelineView``.
+``TimelineItem/isEditable`` can be moved or resized by dragging in ``ZoomableDayTimelineView``,
+which also supports creating new events and deleting existing ones.
 
 ## Topics
 

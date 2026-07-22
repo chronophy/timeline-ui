@@ -96,3 +96,51 @@ ZoomableDayTimelineView(
     }
 )
 ```
+
+While an item is being dragged or resized, it's in edit mode: resize handles appear on the
+block, and (if `onDelete` is supplied) a delete button does too:
+
+![Event in edit mode, with resize handles and a delete button](zoomable-day-editing-light.png)
+
+## Create and Delete Events
+
+Long-pressing (iOS) or click-dragging (macOS) empty background creates a new event; tapping the
+delete button shown on an editable item in edit mode removes it. Both report back through plain
+closures — supply `onCreate`/`onDelete` to receive the result and update your data source:
+
+```swift
+ZoomableDayTimelineView(
+    items: events,
+    onDelete: { item in
+        // Remove item from your data source
+    },
+    onCreate: { start, end in
+        // Insert a new TimelineItem(startDate: start, endDate: end, ...) into your data source
+    }
+)
+```
+
+`onDelete` only requires ``TimelineItem/isEditable``, independent of `onReschedule` — an item
+can be delete-only (no drag handles, just the delete button) by supplying `onDelete` without
+`onReschedule`.
+
+## Observe the Edit Session
+
+`onEditStart`/`onEditEnd` fire once each, when an item enters and exits edit mode — unlike
+`onReschedule`, which fires once per individual drag. Use them for work that should happen once
+per editing session rather than once per drag. Deleting an item also counts as exiting edit
+mode: `onEditEnd` always fires immediately before `onDelete`.
+
+```swift
+ZoomableDayTimelineView(
+    items: events,
+    onReschedule: { updated in /* persist each drag */ },
+    onDelete: { item in /* remove it */ },
+    onEditStart: { item in
+        // e.g. snapshot current state for a possible revert
+    },
+    onEditEnd: { item in
+        // e.g. show a single "saved" indicator for the whole editing session
+    }
+)
+```

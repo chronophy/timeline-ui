@@ -92,6 +92,9 @@ public struct ZoomableDayTimelineView: View {
 	///   - initialHourHeight: The vertical scale (points per hour) to start at, before any pinching.
 	///     Clamped to the same range the pinch gesture allows. Defaults to `60`. Exposed mainly so
 	///     previews/tests/screenshots can pin a zoom level without simulating a gesture.
+	///   - initialEditingItemID: The `id` of an item to start already in edit mode, matching
+	///     `TimelineItem.id`. Defaults to `nil` (nothing starts in edit mode). Exposed mainly so
+	///     previews/tests/screenshots can capture edit mode without simulating a gesture.
 	public init(
 		items: [TimelineItem],
 		onSelect: ((TimelineItem) -> Void)? = nil,
@@ -100,7 +103,8 @@ public struct ZoomableDayTimelineView: View {
 		onDelete: ((TimelineItem) -> Void)? = nil,
 		onEditStart: ((TimelineItem) -> Void)? = nil,
 		onEditEnd: ((TimelineItem) -> Void)? = nil,
-		initialHourHeight: CGFloat = 60
+		initialHourHeight: CGFloat = 60,
+		initialEditingItemID: UUID? = nil
 	) {
 		self.items = items
 		self.onSelect = onSelect
@@ -118,6 +122,7 @@ public struct ZoomableDayTimelineView: View {
 				max: Self.maxHourHeight
 			)
 		)
+		_editingItemID = State(initialValue: initialEditingItemID)
 	}
 
 	/// Creates a zoomable day timeline view whose zoom level is externally owned.
@@ -143,6 +148,9 @@ public struct ZoomableDayTimelineView: View {
 	///     to `nil`.
 	///   - onEditEnd: Called once with the item's latest edits when the user exits edit mode.
 	///     Defaults to `nil`.
+	///   - initialEditingItemID: The `id` of an item to start already in edit mode, matching
+	///     `TimelineItem.id`. Defaults to `nil` (nothing starts in edit mode). Exposed mainly so
+	///     previews/tests/screenshots can capture edit mode without simulating a gesture.
 	public init(
 		items: [TimelineItem],
 		hourHeight: Binding<CGFloat>,
@@ -151,7 +159,8 @@ public struct ZoomableDayTimelineView: View {
 		onCreate: ((_ start: Date, _ end: Date) -> Void)? = nil,
 		onDelete: ((TimelineItem) -> Void)? = nil,
 		onEditStart: ((TimelineItem) -> Void)? = nil,
-		onEditEnd: ((TimelineItem) -> Void)? = nil
+		onEditEnd: ((TimelineItem) -> Void)? = nil,
+		initialEditingItemID: UUID? = nil
 	) {
 		self.items = items
 		self.onSelect = onSelect
@@ -162,6 +171,7 @@ public struct ZoomableDayTimelineView: View {
 		self.onEditEnd = onEditEnd
 		self.externalHourHeight = hourHeight
 		_internalHourHeight = State(initialValue: hourHeight.wrappedValue)
+		_editingItemID = State(initialValue: initialEditingItemID)
 	}
 
 	@State private var internalHourHeight: CGFloat
@@ -457,17 +467,35 @@ public struct ZoomableDayTimelineView: View {
 			if let createDragState {
 				let calendar = Calendar.current
 				let snapMinutesValue = snapMinutes(viewportHeight: viewportHeight)
-				let start = snappedDate(atY: createDragState.start, snapMinutesValue: snapMinutesValue, calendar: calendar)
+				let start = snappedDate(
+					atY: createDragState.start,
+					snapMinutesValue: snapMinutesValue,
+					calendar: calendar
+				)
 				let current = snappedDate(
-					atY: createDragState.current, snapMinutesValue: snapMinutesValue, calendar: calendar)
+					atY: createDragState.current,
+					snapMinutesValue: snapMinutesValue,
+					calendar: calendar
+				)
 				let ordered = RescheduleMath.orderedRange(
-					start, current, minimumDuration: TimeInterval(snapMinutesValue * 60))
+					start,
+					current,
+					minimumDuration: TimeInterval(snapMinutesValue * 60)
+				)
 				let topY = EventPositionMath.yOffset(
-					of: ordered.start, referenceDate: baseDate, rangeStart: 0, hourHeight: effectiveHourHeight,
-					calendar: calendar)
+					of: ordered.start,
+					referenceDate: baseDate,
+					rangeStart: 0,
+					hourHeight: effectiveHourHeight,
+					calendar: calendar
+				)
 				let bottomY = EventPositionMath.yOffset(
-					of: ordered.end, referenceDate: baseDate, rangeStart: 0, hourHeight: effectiveHourHeight,
-					calendar: calendar)
+					of: ordered.end,
+					referenceDate: baseDate,
+					rangeStart: 0,
+					hourHeight: effectiveHourHeight,
+					calendar: calendar
+				)
 
 				RoundedRectangle(cornerRadius: 4)
 					.fill(Color.accentColor.opacity(0.25))

@@ -106,6 +106,62 @@ ZoomableDayTimelineView(
 )
 ```
 
+While an item is being dragged or resized it's in "edit mode": resize handles appear on the
+block, and (if `onDelete` is supplied) a delete button does too. Edit mode is a small state
+machine (long-press on iOS / click on macOS → edit mode → tap elsewhere → view mode), coordinated
+across sibling `TimelineEventBlock`s via a shared `editingItemID: UUID?` binding owned by
+`ZoomableDayTimelineView`. `initialEditingItemID` seeds it for previews/tests without simulating
+a gesture (see `zoomable-day-editing` in `RenderPreviews/main.swift`).
+
+### Create and Delete Events
+
+Long-pressing (iOS) or click-dragging (macOS) empty background in `ZoomableDayTimelineView`
+creates a new event — matching each platform's native calendar convention, with a live preview
+on macOS. Tapping the delete button shown on an editable item in edit mode deletes it. Both
+report back through plain closures; the library never constructs or removes a `TimelineItem`
+itself:
+
+```swift
+ZoomableDayTimelineView(
+    items: items,
+    onDelete: { item in
+        // Remove item from your data source
+    },
+    onCreate: { start, end in
+        // Insert a new TimelineItem(startDate: start, endDate: end, ...) into your data source
+    }
+)
+```
+
+`onDelete` is gated on `isEditable` independently of `onReschedule` — an item can be delete-only
+(no drag handles, just the delete button) by supplying `onDelete` without `onReschedule`. Deleting
+also exits edit mode: `onEditEnd` (below) always fires immediately before `onDelete`, fired
+explicitly in `TimelineEventBlock.deleteButton()` rather than left to the `editingItemID`
+`onChange` handler, since that's deferred to the next SwiftUI update cycle and would otherwise
+make `onDelete` observably fire before `onEditEnd`.
+
+### Edit Lifecycle Notifications
+
+`onEditStart`/`onEditEnd` fire once each, when an item enters and exits edit mode, as opposed to
+`onReschedule` firing once per individual drag. Use them for work that should happen once per
+editing session rather than once per drag:
+
+```swift
+ZoomableDayTimelineView(
+    items: items,
+    onEditStart: { item in
+        // e.g. snapshot current state for a possible revert
+    },
+    onEditEnd: { item in
+        // e.g. show a single "saved" indicator for the whole editing session
+    }
+)
+```
+
+Neither is guaranteed to fire if `TimelineEventBlock` is torn down without an explicit edit-mode
+exit (e.g. the host navigates away mid-edit) — `onReschedule`/`onDelete` already covered the data
+at that point, so nothing but these notifications is lost.
+
 ## Coding Conventions
 
 - Use Swift Testing framework with raw identifiers for test names:

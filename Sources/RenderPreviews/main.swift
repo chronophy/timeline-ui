@@ -150,10 +150,21 @@ let allDayItems: [TimelineItem] = [
 enum ViewType {
 	case day
 	case zoomableDay(hourHeight: CGFloat, frameHeight: CGFloat)
+	case zoomableDayEditing(hourHeight: CGFloat, frameHeight: CGFloat, editingItemID: UUID)
 	case weekStrip(selectedDate: Date, calendar: Calendar)
 	case weekTimeline(selectedDate: Date, calendar: Calendar)
 	case compact(HeightMode, height: CGFloat)
 }
+
+let editModeItem = TimelineItem(
+	title: "Team Meeting",
+	startDate: makeDate(hour: 10, minute: 0),
+	endDate: makeDate(hour: 11, minute: 0),
+	color: .blue,
+	location: "Conference Room A",
+	isPrimary: true,
+	isEditable: true
+)
 
 let weekPreviewSelectedDate = makeDate(hour: 12, minute: 0)
 
@@ -171,6 +182,10 @@ let previewScenarios: [(name: String, items: [TimelineItem], viewType: ViewType)
 	("day-many", manyItems, .day),
 	("zoomable-day-default", sampleItems, .zoomableDay(hourHeight: 60, frameHeight: 500)),
 	("zoomable-day-zoomed-out", sampleItems, .zoomableDay(hourHeight: 24, frameHeight: 620)),
+	(
+		"zoomable-day-editing", [editModeItem],
+		.zoomableDayEditing(hourHeight: 60, frameHeight: 500, editingItemID: editModeItem.id)
+	),
 	("week-strip-default", [], .weekStrip(selectedDate: weekPreviewSelectedDate, calendar: .current)),
 	(
 		"week-strip-locale-fr", [],
@@ -229,6 +244,23 @@ func renderAllPreviews() {
 					.clipShape(RoundedRectangle(cornerRadius: 16))
 					.padding(20)
 					.background(Color(nsColor: .windowBackgroundColor))
+			)
+			size = CGSize(width: 435, height: frameHeight + 72)
+		case .zoomableDayEditing(let hourHeight, let frameHeight, let editingItemID):
+			view = AnyView(
+				ZoomableDayTimelineView(
+					items: items,
+					onReschedule: { _ in },
+					onDelete: { _ in },
+					initialHourHeight: hourHeight,
+					initialEditingItemID: editingItemID
+				)
+				.frame(width: 375, height: frameHeight)
+				.padding(16)
+				.background(.background)
+				.clipShape(RoundedRectangle(cornerRadius: 16))
+				.padding(20)
+				.background(Color(nsColor: .windowBackgroundColor))
 			)
 			size = CGSize(width: 435, height: frameHeight + 72)
 		case .weekStrip(let selectedDate, let calendar):
