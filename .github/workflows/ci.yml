@@ -1,0 +1,22 @@
+on:
+  pull_request:
+  push:
+
+jobs:
+  version:
+    uses: nxlabs-ch/shared-workflows/.github/workflows/version.yml@v1.11.1
+    with:
+      tag_prefix: ""
+    secrets:
+      FF_MERGE_PAT: ${{ secrets.FF_MERGE_PAT }}
+
+  test:
+    needs: [version]
+    uses: ./.github/workflows/tests.yml
+
+  release:
+    if: github.ref == 'refs/heads/main'
+    needs: [version, test]
+    uses: nxlabs-ch/shared-workflows/.github/workflows/deploy-release.yml@v1.11.1
+    with:
+      tag: ${{ needs.version.outputs.tag }}

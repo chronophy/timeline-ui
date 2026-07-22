@@ -26,6 +26,14 @@ let sampleItems: [TimelineItem] = [
 		color: .purple,
 		isPrimary: false
 	),
+	TimelineItem(
+		title: "All day event",
+		startDate: makeDate(hour: 0, minute: 0),
+		endDate: makeDate(hour: 23, minute: 59),
+		isAllDay: true,
+		color: .red,
+		isPrimary: false
+	),
 ]
 
 let conflictingItems: [TimelineItem] = [
@@ -141,14 +149,49 @@ let allDayItems: [TimelineItem] = [
 
 enum ViewType {
 	case day
+	case zoomableDay(hourHeight: CGFloat, frameHeight: CGFloat)
+	case zoomableDayEditing(hourHeight: CGFloat, frameHeight: CGFloat, editingItemID: UUID)
+	case weekStrip(selectedDate: Date, calendar: Calendar)
+	case weekTimeline(selectedDate: Date, calendar: Calendar)
 	case compact(HeightMode, height: CGFloat)
 }
+
+let editModeItem = TimelineItem(
+	title: "Team Meeting",
+	startDate: makeDate(hour: 10, minute: 0),
+	endDate: makeDate(hour: 11, minute: 0),
+	color: .blue,
+	location: "Conference Room A",
+	isPrimary: true,
+	isEditable: true
+)
+
+let weekPreviewSelectedDate = makeDate(hour: 12, minute: 0)
+
+let frenchMondayFirstCalendar: Calendar = {
+	var calendar = Calendar(identifier: .gregorian)
+	calendar.locale = Locale(identifier: "fr_FR")
+	calendar.firstWeekday = 2
+	return calendar
+}()
 
 let previewScenarios: [(name: String, items: [TimelineItem], viewType: ViewType)] = [
 	("day-simple", sampleItems, .day),
 	("day-conflicts", conflictingItems, .day),
 	("day-with-allday", allDayItems, .day),
 	("day-many", manyItems, .day),
+	("zoomable-day-default", sampleItems, .zoomableDay(hourHeight: 60, frameHeight: 500)),
+	("zoomable-day-zoomed-out", sampleItems, .zoomableDay(hourHeight: 24, frameHeight: 620)),
+	(
+		"zoomable-day-editing", [editModeItem],
+		.zoomableDayEditing(hourHeight: 60, frameHeight: 500, editingItemID: editModeItem.id)
+	),
+	("week-strip-default", [], .weekStrip(selectedDate: weekPreviewSelectedDate, calendar: .current)),
+	(
+		"week-strip-locale-fr", [],
+		.weekStrip(selectedDate: weekPreviewSelectedDate, calendar: frenchMondayFirstCalendar)
+	),
+	("week-timeline-default", sampleItems, .weekTimeline(selectedDate: weekPreviewSelectedDate, calendar: .current)),
 	("compact-simple", sampleItems, .compact(.fixed(hours: 2), height: 132)),
 	("compact-conflicts", conflictingItems, .compact(.fixed(hours: 2), height: 132)),
 	("compact-many", manyItems, .compact(.fixed(hours: 2), height: 132)),
@@ -184,6 +227,56 @@ func renderAllPreviews() {
 		case .day:
 			view = AnyView(
 				DayTimelineView(items: items)
+					.frame(width: 375, height: 500)
+					.padding(16)
+					.background(.background)
+					.clipShape(RoundedRectangle(cornerRadius: 16))
+					.padding(20)
+					.background(Color(nsColor: .windowBackgroundColor))
+			)
+			size = CGSize(width: 435, height: 572)
+		case .zoomableDay(let hourHeight, let frameHeight):
+			view = AnyView(
+				ZoomableDayTimelineView(items: items, initialHourHeight: hourHeight)
+					.frame(width: 375, height: frameHeight)
+					.padding(16)
+					.background(.background)
+					.clipShape(RoundedRectangle(cornerRadius: 16))
+					.padding(20)
+					.background(Color(nsColor: .windowBackgroundColor))
+			)
+			size = CGSize(width: 435, height: frameHeight + 72)
+		case .zoomableDayEditing(let hourHeight, let frameHeight, let editingItemID):
+			view = AnyView(
+				ZoomableDayTimelineView(
+					items: items,
+					onReschedule: { _ in },
+					onDelete: { _ in },
+					initialHourHeight: hourHeight,
+					initialEditingItemID: editingItemID
+				)
+				.frame(width: 375, height: frameHeight)
+				.padding(16)
+				.background(.background)
+				.clipShape(RoundedRectangle(cornerRadius: 16))
+				.padding(20)
+				.background(Color(nsColor: .windowBackgroundColor))
+			)
+			size = CGSize(width: 435, height: frameHeight + 72)
+		case .weekStrip(let selectedDate, let calendar):
+			view = AnyView(
+				WeekStripView(selectedDate: .constant(selectedDate), calendar: calendar)
+					.frame(width: 375)
+					.padding(16)
+					.background(.background)
+					.clipShape(RoundedRectangle(cornerRadius: 16))
+					.padding(20)
+					.background(Color(nsColor: .windowBackgroundColor))
+			)
+			size = CGSize(width: 435, height: 150)
+		case .weekTimeline(let selectedDate, let calendar):
+			view = AnyView(
+				WeekTimelineView(items: items, selectedDate: .constant(selectedDate), calendar: calendar)
 					.frame(width: 375, height: 500)
 					.padding(16)
 					.background(.background)
@@ -289,6 +382,21 @@ func accessControlPreviews() -> [(name: String, view: AnyView, size: CGSize)] {
 func renderView<V: View>(_ view: V, size: CGSize) -> NSImage? {
 	let hostingView = NSHostingView(rootView: view)
 	hostingView.frame = CGRect(origin: .zero, size: size)
+
+	let window = NSWindow(
+		contentRect: hostingView.frame,
+		styleMask: [.borderless],
+		backing: .buffered,
+		defer: false
+	)
+	window.contentView = hostingView
+	window.setIsVisible(false)
+
+	// Views with `.onAppear`-driven state (e.g. scrolling to an initial position) need a few
+	// run loop turns for SwiftUI's async update cycle to apply that state before we capture a bitmap.
+	for _ in 0..<5 {
+		RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+	}
 
 	let bitmapRep = hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds)
 	guard let rep = bitmapRep else { return nil }

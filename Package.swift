@@ -29,7 +29,7 @@ targets.append(
 
 let package = Package(
 	name: "TimelineUI",
-	platforms: [.iOS(.v26), .macOS(.v14)],
+	platforms: [.iOS(.v26), .macOS(.v15)],
 	products: [
 		.library(name: "TimelineUI", targets: ["TimelineUI"]),
 		.library(name: "TimelineUIEventKit", targets: ["TimelineUIEventKit"]),

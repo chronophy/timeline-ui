@@ -1,0 +1,8 @@
+{
+    "import": "../.cspell.json",
+    "words": [
+        "checkmark",
+        "gregorian",
+        "subheadline"
+    ]
+}

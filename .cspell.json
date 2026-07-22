@@ -1,0 +1,19 @@
+{
+    "version": "0.2",
+    "language": "en,en-GB",
+    "words": [
+        "Codeberg",
+        "zoomable"
+    ],
+    "ignorePaths": [
+        "**/.cspell.json",
+        ".gitignore",
+        ".swift-format"
+    ],
+    "languageSettings": [
+        {
+            "languageId": "swift",
+            "caseSensitive": true
+        }
+    ]
+}

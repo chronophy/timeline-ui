@@ -235,7 +235,7 @@ public struct CompactTimelineView: View {
 						.frame(height: 1)
 						.frame(maxWidth: .infinity)
 				}
-				.frame(height: hourHeight)
+				.frame(height: hourHeight, alignment: .top)
 			}
 		}
 	}

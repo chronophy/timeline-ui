@@ -12,7 +12,12 @@ TimelineUI provides SwiftUI views for displaying daily schedules. Events are pos
 
 ![Compact timeline showing events](compact-conflicts-light.png)
 
-Use ``DayTimelineView`` for full-day schedules that expand to fill available space, or ``CompactTimelineView`` for a focused 2-3 hour window ideal for widgets.
+Use ``DayTimelineView`` for full-day schedules that expand to fill available space,
+``CompactTimelineView`` for a focused 2-3 hour window ideal for widgets, or
+``ZoomableDayTimelineView`` for a scrollable, pinch-to-zoom full day — pair it with
+``WeekStripView`` (or the combined ``WeekTimelineView``) for week navigation. Items marked
+``TimelineItem/isEditable`` can be moved or resized by dragging in ``ZoomableDayTimelineView``,
+which also supports creating new events and deleting existing ones.
 
 ## Topics
 
@@ -25,12 +30,14 @@ Use ``DayTimelineView`` for full-day schedules that expand to fill available spa
 
 - ``DayTimelineView``
 - ``CompactTimelineView``
+- ``ZoomableDayTimelineView``
+- ``WeekStripView``
+- ``WeekTimelineView``
 - ``HeightMode``
 
 ### Event Data
 
 - ``TimelineItem``
-- ``TimelineEventBlock``
 
 ### Expandable Timeline
 

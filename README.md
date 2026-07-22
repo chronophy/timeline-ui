@@ -1,8 +1,10 @@
+<!-- markdownlint-disable MD033 MD060 -->
 # TimelineUI
 
 <a href="https://codeberg.org/ctietze/timeline-ui"><img src="https://img.shields.io/badge/Codeberg-canonical-2185D0?logo=codeberg" alt="Codeberg"></a>
 <img src="https://img.shields.io/badge/Swift-6.2-F05138?logo=swift&logoColor=white" alt="Swift 6.2">
 <img src="https://img.shields.io/badge/iOS-26%2B-000000?logo=apple&logoColor=white" alt="iOS 26+">
+<img src="https://img.shields.io/badge/macOS-15%2B-000000?logo=apple&logoColor=white" alt="macOS 15+">
 
 A SwiftUI component library for displaying calendar timeline views in iOS apps. Show daily schedules on an hour grid with automatic layout for overlapping events.
 
@@ -56,6 +58,16 @@ Full day timeline that automatically expands to fill available space. Shows hour
 DayTimelineView(items: [TimelineItem])
 ```
 
+### ZoomableDayTimelineView
+
+Full day timeline with pinch-to-zoom on the hour grid. Unlike `DayTimelineView`, it always
+lays out the full 24-hour day inside a scroll view and lets the user pinch (or trackpad-pinch
+on macOS) to change the vertical scale — the hour under the zoom stays centered on screen.
+
+```swift
+ZoomableDayTimelineView(items: [TimelineItem])
+```
+
 ### CompactTimelineView
 
 Compact timeline window, ideal for widgets or previews.
@@ -92,6 +104,109 @@ CompactTimelineView(items: items, heightMode: .fixed(hours: 2))
             .timelineTransition(in: timelineNamespace)
     }
 }
+```
+
+### Week Strip Toolbar
+
+A locale-aware 7-day week strip with single-letter weekday headers and the selected day
+highlighted, similar to Apple Calendar's day-view header. Swipe (or click-drag on macOS) and
+the chevron buttons page between weeks; tapping a day selects it. The weekday letters and
+first day of the week both follow the given `Calendar`'s locale — a Monday-first locale shows
+`M T W T F S S`, a Sunday-first locale shows `S M T W T F S`:
+
+![Week strip, French locale](screenshots/week-strip-locale-fr-light.png)
+
+```swift
+@State private var selectedDate = Date()
+
+WeekStripView(selectedDate: $selectedDate)
+```
+
+Pair it with a scrollable day timeline via `WeekTimelineView`, which pins the week strip above
+a `ZoomableDayTimelineView` and coordinates the selection between them. Supply `items` already
+filtered to `selectedDate`, and update them whenever the binding changes:
+
+```swift
+WeekTimelineView(items: eventsForSelectedDay, selectedDate: $selectedDate)
+```
+
+### Drag to Reschedule
+
+Events marked `isEditable: true` can be moved or resized by dragging in `ZoomableDayTimelineView`
+(and `WeekTimelineView`, which is built on it). On iOS, a long-press on the block enters edit
+mode; on macOS, a plain click does. While editing, resize handles appear on the block, and both
+the body (move) and either handle (resize) accept drags — snapped to a granularity (5/15/30/60
+minutes) that adapts to the current zoom level. Tapping elsewhere exits edit mode:
+
+![Event in edit mode, with resize handles and a delete button](screenshots/zoomable-day-editing-light.png)
+
+```swift
+let items = [
+    TimelineItem(
+        title: "Team Meeting",
+        startDate: Date(),
+        endDate: Date().addingTimeInterval(3600),
+        color: .blue,
+        isEditable: true
+    )
+]
+
+ZoomableDayTimelineView(
+    items: items,
+    onReschedule: { updated in
+        // Persist updated.startDate / updated.endDate
+    }
+)
+```
+
+### Create & Delete Events
+
+Long-pressing (iOS) or click-dragging (macOS) empty background creates a new event, matching
+each platform's native calendar convention — iOS creates a default one-hour event at the
+press location, macOS sizes the event by the drag, with a live preview. Deleting is an
+in-timeline affordance: an editable item shown in edit mode (see above) grows a delete button
+alongside its resize handles. Both report back through plain closures — the library never
+constructs or removes a `TimelineItem` itself, matching `onReschedule`'s "host owns the data"
+design. Neither fires a confirmation before deleting; add one in your `onDelete` handler if you
+want it.
+
+```swift
+ZoomableDayTimelineView(
+    items: items,
+    onDelete: { item in
+        // Remove item from your data source
+    },
+    onCreate: { start, end in
+        // Insert a new TimelineItem(startDate: start, endDate: end, ...) into your data source
+    }
+)
+```
+
+`onDelete` only requires `TimelineItem.isEditable`, independent of `onReschedule` — an item can
+be delete-only (no drag handles, just the delete button) by supplying `onDelete` without
+`onReschedule`.
+
+### Edit Lifecycle Notifications
+
+`onEditStart`/`onEditEnd` fire once each, when an item enters and exits edit mode — as opposed
+to `onReschedule`, which fires once per individual drag. Use them for work that should happen
+once per editing *session* rather than once per drag, e.g. a single "saved" indicator after a
+user drags the start handle, then the end handle. Deleting an item also counts as exiting edit
+mode: `onEditEnd` always fires immediately before `onDelete`, so there's no separate rule to
+remember for "the user deleted it" vs. "the user finished editing it."
+
+```swift
+ZoomableDayTimelineView(
+    items: items,
+    onReschedule: { updated in /* persist each drag */ },
+    onDelete: { item in /* remove it */ },
+    onEditStart: { item in
+        // e.g. snapshot current state for a possible revert
+    },
+    onEditEnd: { item in
+        // e.g. show a single "saved" indicator for the whole editing session
+    }
+)
 ```
 
 ### Access Restricted View
@@ -136,11 +251,17 @@ AccessPromptView(
 | **Day** - Full schedule with hour grid | ![Day light](screenshots/day-simple-light.png) | ![Day dark](screenshots/day-simple-dark.png) |
 | **Overlapping** - Events arranged side-by-side | ![Overlapping light](screenshots/day-conflicts-light.png) | ![Overlapping dark](screenshots/day-conflicts-dark.png) |
 | **Many events** - Handles busy schedules gracefully | ![Many light](screenshots/compact-many-light.png) | ![Many dark](screenshots/compact-many-dark.png) |
+| **Zoomable day** - Default pinch-zoom level | ![Zoomable day default light](screenshots/zoomable-day-default-light.png) | ![Zoomable day default dark](screenshots/zoomable-day-default-dark.png) |
+| **Zoomable day** - Zoomed out to fit the whole day | ![Zoomable day zoomed out light](screenshots/zoomable-day-zoomed-out-light.png) | ![Zoomable day zoomed out dark](screenshots/zoomable-day-zoomed-out-dark.png) |
+| **Edit mode** - Resize handles and delete button while editing | ![Edit mode light](screenshots/zoomable-day-editing-light.png) | ![Edit mode dark](screenshots/zoomable-day-editing-dark.png) |
+| **Week strip** - Locale-aware toolbar with swipe/chevron navigation | ![Week strip light](screenshots/week-strip-default-light.png) | ![Week strip dark](screenshots/week-strip-default-dark.png) |
+| **Week timeline** - Week strip pinned above a zoomable day timeline | ![Week timeline light](screenshots/week-timeline-default-light.png) | ![Week timeline dark](screenshots/week-timeline-default-dark.png) |
 | **Access restricted** - Blurred with permission prompt | ![Restricted light](screenshots/access-restricted-light.png) | ![Restricted dark](screenshots/access-restricted-dark.png) |
 
 ## Requirements
 
 - iOS 26+
+- macOS 15+
 - Swift 6.2+
 
 ## License
