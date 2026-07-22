@@ -12,6 +12,7 @@ TimelineUI is a SwiftUI component library for displaying calendar timeline visua
 mise run build      # Build the Swift package
 mise run tests      # Run package unit tests
 mise run format     # Format Swift source files
+mise run lint       # Check formatting without writing anything (what CI runs)
 mise run previews   # Generate preview PNG images to ./previews/
 mise run clean      # Clean build artifacts
 ```
