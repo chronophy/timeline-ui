@@ -215,6 +215,52 @@ private func time(_ hour: Int, _ minute: Int, calendar: Calendar) -> Date {
 	#expect(resized == time(10, 15, calendar: calendar))
 }
 
+// MARK: - orderedRange
+
+@Test func `orderedRange leaves an already-ordered pair unchanged`() throws {
+	let calendar = utcCalendar()
+	let start = time(10, 0, calendar: calendar)
+	let end = time(11, 0, calendar: calendar)
+
+	let ordered = RescheduleMath.orderedRange(start, end, minimumDuration: 900)
+
+	#expect(ordered.start == start)
+	#expect(ordered.end == end)
+}
+
+@Test func `orderedRange swaps a reversed pair`() throws {
+	let calendar = utcCalendar()
+	let earlier = time(10, 0, calendar: calendar)
+	let later = time(11, 0, calendar: calendar)
+
+	let ordered = RescheduleMath.orderedRange(later, earlier, minimumDuration: 900)
+
+	#expect(ordered.start == earlier)
+	#expect(ordered.end == later)
+}
+
+@Test func `orderedRange clamps a too-short pair up to the minimum duration`() throws {
+	let calendar = utcCalendar()
+	let start = time(10, 0, calendar: calendar)
+	let end = time(10, 5, calendar: calendar)
+
+	let ordered = RescheduleMath.orderedRange(start, end, minimumDuration: 900)
+
+	#expect(ordered.start == start)
+	#expect(ordered.end == time(10, 15, calendar: calendar))
+}
+
+@Test func `orderedRange passes through a pair exactly at the minimum duration unchanged`() throws {
+	let calendar = utcCalendar()
+	let start = time(10, 0, calendar: calendar)
+	let end = time(10, 15, calendar: calendar)
+
+	let ordered = RescheduleMath.orderedRange(start, end, minimumDuration: 900)
+
+	#expect(ordered.start == start)
+	#expect(ordered.end == end)
+}
+
 // MARK: - TimelineItem.rescheduled
 
 @Test func `rescheduled preserves every field other than the dates`() throws {

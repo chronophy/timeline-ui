@@ -21,6 +21,22 @@ enum EventPositionMath {
 		let hoursFromRangeStart = hoursSinceStartOfDay - Double(rangeStart)
 		return CGFloat(hoursFromRangeStart) * hourHeight
 	}
+
+	/// Exact inverse of `yOffset(of:referenceDate:rangeStart:hourHeight:calendar:)` — unsnapped,
+	/// by design (snapping is a separate, later step, same layering used throughout this file:
+	/// raw geometry math never snaps itself).
+	static func date(
+		atYOffset yOffset: CGFloat,
+		referenceDate: Date,
+		rangeStart: Int,
+		hourHeight: CGFloat,
+		calendar: Calendar
+	) -> Date {
+		let hoursFromRangeStart = Double(yOffset / hourHeight)
+		let hoursSinceStartOfDay = hoursFromRangeStart + Double(rangeStart)
+		let startOfDay = calendar.startOfDay(for: referenceDate)
+		return startOfDay.addingTimeInterval(hoursSinceStartOfDay * 3600)
+	}
 }
 
 /// Pure, testable math for drag-to-reschedule: adaptive snap granularity, and the
@@ -102,6 +118,16 @@ enum RescheduleMath {
 		let earliestAllowedEnd = originalStart.addingTimeInterval(minDuration)
 		return max(snappedEnd, earliestAllowedEnd)
 	}
+
+	/// Swaps a reversed pair (the user dragged upward) and clamps up to `minimumDuration` if the
+	/// dragged range is too short — needed for macOS's click-drag-to-create, which can produce
+	/// either.
+	static func orderedRange(_ a: Date, _ b: Date, minimumDuration: TimeInterval) -> (start: Date, end: Date) {
+		let start = min(a, b)
+		let end = max(a, b)
+		guard end.timeIntervalSince(start) < minimumDuration else { return (start, end) }
+		return (start, start.addingTimeInterval(minimumDuration))
+	}
 }
 
 /// Renders one event. Drag-to-reschedule is a small state machine, coordinated across sibling
@@ -127,6 +153,25 @@ struct TimelineEventBlock: View {
 	let contentWidth: CGFloat
 	let onSelect: ((TimelineItem) -> Void)?
 	let onReschedule: ((TimelineItem) -> Void)?
+	/// Called when the user taps the delete affordance shown while this item is in edit mode.
+	/// Deleting also exits edit mode, so `onEditEnd` fires immediately before this — hosts don't
+	/// need a separate rule for "the user deleted it" vs. "the user finished editing it."
+	let onDelete: ((TimelineItem) -> Void)?
+	/// Called once when the user enters edit mode for this item — long-pressing (iOS) or clicking
+	/// (macOS) it — with its state at that moment, before any edits happen this session. Lets a
+	/// host prepare for a batch of upcoming edits (e.g. snapshot current state for a possible
+	/// revert, show an "editing" indicator) without doing that work on every individual drag.
+	let onEditStart: ((TimelineItem) -> Void)?
+	/// Called once when the user exits edit mode for this item — tapping elsewhere, tapping
+	/// another event, or otherwise clearing `editingItemID` — with the item reflecting its
+	/// latest edits (via `committedItem`, not necessarily yet reconciled into `item` itself if the
+	/// host hasn't returned an updated `items` array since the last `onReschedule`). Useful for
+	/// one-shot wrap-up work that shouldn't run after *every* individual drag — e.g. a single
+	/// "saved" indicator after a user drags the start handle, then the end handle, rather than one
+	/// per handle. Neither this nor `onEditStart` is guaranteed to fire if this view is torn down
+	/// without an explicit edit-mode exit (e.g. the host navigates away mid-edit) — `onReschedule`/
+	/// `onDelete` already covered the data at that point, so nothing but these notifications is lost.
+	let onEditEnd: ((TimelineItem) -> Void)?
 	let snapMinutes: Int
 	@Binding var editingItemID: UUID?
 
@@ -141,13 +186,30 @@ struct TimelineEventBlock: View {
 	@GestureState private var resizeEndDragState: CGFloat?
 	@State private var activeDrag: (mode: DragMode, originalStart: Date, originalEnd: Date)?
 	@State private var pendingReschedule: (start: Date, end: Date)?
+	/// Set right before a delete-triggered `editingItemID` clear, so the `.onChange` below doesn't
+	/// *also* fire `onEditEnd` — `deleteButton()` already fires it explicitly and synchronously, in
+	/// the correct order relative to `onDelete`. `.onChange` alone isn't enough for that ordering:
+	/// SwiftUI defers it to the next update cycle, so relying on it here let `onDelete` (which runs
+	/// immediately, in the same call stack as the `editingItemID` write) observably fire *before*
+	/// `onEditEnd`.
+	@State private var editEndFiredByDelete = false
 
 	private var isRescheduleEnabled: Bool {
 		item.isEditable && onReschedule != nil
 	}
 
+	private var isDeleteEnabled: Bool {
+		item.isEditable && onDelete != nil
+	}
+
+	/// Broader than `isRescheduleEnabled` alone: a delete-only item (no `onReschedule`) still
+	/// needs to enter edit mode to show its delete button, even though it can't be dragged.
+	private var canEnterEditMode: Bool {
+		isRescheduleEnabled || isDeleteEnabled
+	}
+
 	private var isEditing: Bool {
-		isRescheduleEnabled && editingItemID == item.id
+		canEnterEditMode && editingItemID == item.id
 	}
 
 	// MARK: - Committed (non-live) geometry — never fed by an in-progress drag, so a view's own
@@ -156,6 +218,13 @@ struct TimelineEventBlock: View {
 
 	private var committedStartDate: Date { pendingReschedule?.start ?? item.startDate }
 	private var committedEndDate: Date { pendingReschedule?.end ?? item.endDate }
+
+	/// `item` folded with any not-yet-reconciled `pendingReschedule` — used for `onEditStart`/
+	/// `onEditEnd` so both report a consistent, up-to-date snapshot regardless of whether the host
+	/// has caught up via a new `items` array since the last `onReschedule`.
+	private var committedItem: TimelineItem {
+		item.rescheduled(startDate: committedStartDate, endDate: committedEndDate)
+	}
 
 	private var committedYOffset: CGFloat {
 		EventPositionMath.yOffset(
@@ -247,9 +316,13 @@ struct TimelineEventBlock: View {
 		ZStack(alignment: .topLeading) {
 			eventCard
 
-			if isEditing {
+			if isEditing && isRescheduleEnabled {
 				handleView(mode: .resizeStart)
 				handleView(mode: .resizeEnd)
+			}
+
+			if isEditing && isDeleteEnabled {
+				deleteButton()
 			}
 
 			if let liveDragTimeLabel {
@@ -267,8 +340,18 @@ struct TimelineEventBlock: View {
 		.onChange(of: resizeEndDragState) { clearActiveDragIfGestureEnded() }
 		.onChange(of: item.startDate) { pendingReschedule = nil }
 		.onChange(of: item.endDate) { pendingReschedule = nil }
-		.onChange(of: editingItemID) {
-			if editingItemID != item.id { activeDrag = nil }
+		.onChange(of: editingItemID) { oldValue, newValue in
+			if newValue != item.id { activeDrag = nil }
+			if newValue == item.id && oldValue != item.id {
+				onEditStart?(committedItem)
+			}
+			if oldValue == item.id && newValue != item.id {
+				if editEndFiredByDelete {
+					editEndFiredByDelete = false
+				} else {
+					onEditEnd?(committedItem)
+				}
+			}
 		}
 	}
 
@@ -394,9 +477,61 @@ struct TimelineEventBlock: View {
 		}
 	}
 
+	/// Rendered at the top-leading corner — the one corner not already used by the resize handles
+	/// (top-trailing = resize-start, bottom-leading = resize-end). Tracks `liveTopDeltaY` the same
+	/// way the resize-start handle does, so it follows the card's top edge while moving/resizing
+	/// instead of staying pinned to the committed (pre-drag) position until release. A discrete tap
+	/// has no live-offset feedback loop, so the oscillation bug this file works hard to avoid
+	/// elsewhere can't recur here; the gesture-zone/visible-layer split below is purely for
+	/// touch-target ergonomics, matching `handleView`. Unlike the card/handles, this always uses
+	/// `.highPriorityGesture` on both platforms — there's no drag of its own to conflict with
+	/// scrolling, so nothing is gained by the lower-priority attachment `eventCard` uses on iOS, and
+	/// without high priority `eventCard`'s own full-card gesture zone (which overlaps this corner)
+	/// wins the tap instead, silently swallowing it.
+	///
+	/// Deleting always exits edit mode: this clears `editingItemID` (rather than leaving it to
+	/// whatever the host does with `items` after `onDelete`, which would otherwise leak edit mode —
+	/// and `ZoomableDayTimelineView`'s `scrollDisabled` with it — until something else happened to
+	/// clear it) and fires `onEditEnd` explicitly, synchronously, and in order before `onDelete`.
+	/// It can't just rely on the `onChange` below for that ordering: SwiftUI defers `.onChange` to
+	/// the next update cycle, so `onDelete` — which runs immediately, same call stack as the
+	/// `editingItemID` write — would observably fire *before* `onEditEnd`. `editEndFiredByDelete`
+	/// suppresses the later `onChange`-driven fire so this doesn't end up calling `onEditEnd` twice.
+	private func deleteButton() -> some View {
+		let position = CGPoint(x: xOffset, y: committedYOffset)
+
+		let visible =
+			Image(systemName: "trash.circle.fill")
+			.symbolRenderingMode(.palette)
+			.foregroundStyle(.white, .red)
+			.font(.system(size: 16))
+			.position(position)
+			.offset(y: liveTopDeltaY)
+			.allowsHitTesting(false)
+
+		let gestureZone =
+			Color.clear
+			.frame(width: handleHitSize, height: handleHitSize)
+			.contentShape(Circle())
+			.position(position)
+
+		return ZStack {
+			visible
+			gestureZone.highPriorityGesture(
+				TapGesture().onEnded {
+					let deletedItem = committedItem
+					editEndFiredByDelete = true
+					editingItemID = nil
+					onEditEnd?(deletedItem)
+					onDelete?(deletedItem)
+				}
+			)
+		}
+	}
+
 	private func handleTap() {
 		onSelect?(item)
-		guard isRescheduleEnabled else {
+		guard canEnterEditMode else {
 			editingItemID = nil
 			return
 		}
@@ -436,6 +571,7 @@ struct TimelineEventBlock: View {
 					state = value.translation.height
 				}
 				.onChanged { _ in
+					guard canEnterEditMode else { return }
 					editingItemID = item.id
 					beginDragIfNeeded(mode: mode)
 				}
@@ -451,6 +587,7 @@ struct TimelineEventBlock: View {
 					}
 				}
 				.onChanged { value in
+					guard canEnterEditMode else { return }
 					if case .second(true, _) = value {
 						editingItemID = item.id
 						beginDragIfNeeded(mode: mode)

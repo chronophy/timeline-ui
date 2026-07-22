@@ -129,6 +129,9 @@ public struct DayTimelineView: View {
 							contentWidth: contentWidth,
 							onSelect: onSelect,
 							onReschedule: nil,
+							onDelete: nil,
+							onEditStart: nil,
+							onEditEnd: nil,
 							snapMinutes: 60,
 							editingItemID: .constant(nil)
 						)

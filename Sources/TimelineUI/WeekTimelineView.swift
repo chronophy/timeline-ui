@@ -33,6 +33,26 @@ public struct WeekTimelineView: View {
 	/// Only items with `TimelineItem.isEditable == true` can be dragged.
 	public let onReschedule: ((TimelineItem) -> Void)?
 
+	/// Called when the user creates a new event by long-pressing (iOS) or click-dragging (macOS)
+	/// empty background, with the snapped, correctly-ordered start and end dates. Defaults to
+	/// `nil`, which leaves empty background non-interactive.
+	public let onCreate: ((_ start: Date, _ end: Date) -> Void)?
+
+	/// Called when the user taps the delete affordance shown on an editable event block while
+	/// it's in edit mode, with the item to delete. Only items with `TimelineItem.isEditable == true`
+	/// show this affordance. Also exits edit mode, firing `onEditEnd` immediately before this.
+	/// Defaults to `nil`, which leaves event blocks without a delete affordance.
+	public let onDelete: ((TimelineItem) -> Void)?
+
+	/// Called once when the user enters edit mode for an item, with its state at that moment,
+	/// before any edits happen this session. Defaults to `nil`.
+	public let onEditStart: ((TimelineItem) -> Void)?
+
+	/// Called once when the user exits edit mode for an item, with the item reflecting its latest
+	/// edits. Useful for one-shot wrap-up work that shouldn't run after every individual drag.
+	/// Defaults to `nil`.
+	public let onEditEnd: ((TimelineItem) -> Void)?
+
 	let calendar: Calendar
 
 	@State private var internalHourHeight: CGFloat
@@ -54,6 +74,15 @@ public struct WeekTimelineView: View {
 	///     to `nil`, which leaves event blocks non-interactive.
 	///   - onReschedule: Called with the updated item when the user moves or resizes an editable
 	///     event block by dragging. Defaults to `nil`, which leaves event blocks non-draggable.
+	///   - onCreate: Called with the start and end dates when the user creates a new event on empty
+	///     background. Defaults to `nil`, which leaves empty background non-interactive.
+	///   - onDelete: Called with the item when the user taps an editable event block's delete
+	///     affordance. Also exits edit mode, firing `onEditEnd` immediately before this. Defaults
+	///     to `nil`, which leaves event blocks without a delete affordance.
+	///   - onEditStart: Called once with the item's state when the user enters edit mode. Defaults
+	///     to `nil`.
+	///   - onEditEnd: Called once with the item's latest edits when the user exits edit mode.
+	///     Defaults to `nil`.
 	///   - initialHourHeight: The vertical scale (points per hour) the timeline starts at,
 	///     before any pinching. Defaults to `60`.
 	///   - calendar: The calendar used by the week strip to determine week boundaries,
@@ -63,6 +92,10 @@ public struct WeekTimelineView: View {
 		selectedDate: Binding<Date>,
 		onSelect: ((TimelineItem) -> Void)? = nil,
 		onReschedule: ((TimelineItem) -> Void)? = nil,
+		onCreate: ((_ start: Date, _ end: Date) -> Void)? = nil,
+		onDelete: ((TimelineItem) -> Void)? = nil,
+		onEditStart: ((TimelineItem) -> Void)? = nil,
+		onEditEnd: ((TimelineItem) -> Void)? = nil,
 		initialHourHeight: CGFloat = 60,
 		calendar: Calendar = .current
 	) {
@@ -70,6 +103,10 @@ public struct WeekTimelineView: View {
 		self._selectedDate = selectedDate
 		self.onSelect = onSelect
 		self.onReschedule = onReschedule
+		self.onCreate = onCreate
+		self.onDelete = onDelete
+		self.onEditStart = onEditStart
+		self.onEditEnd = onEditEnd
 		self.calendar = calendar
 		self.externalHourHeight = nil
 		_internalHourHeight = State(
@@ -99,6 +136,15 @@ public struct WeekTimelineView: View {
 	///     to `nil`, which leaves event blocks non-interactive.
 	///   - onReschedule: Called with the updated item when the user moves or resizes an editable
 	///     event block by dragging. Defaults to `nil`, which leaves event blocks non-draggable.
+	///   - onCreate: Called with the start and end dates when the user creates a new event on empty
+	///     background. Defaults to `nil`, which leaves empty background non-interactive.
+	///   - onDelete: Called with the item when the user taps an editable event block's delete
+	///     affordance. Also exits edit mode, firing `onEditEnd` immediately before this. Defaults
+	///     to `nil`, which leaves event blocks without a delete affordance.
+	///   - onEditStart: Called once with the item's state when the user enters edit mode. Defaults
+	///     to `nil`.
+	///   - onEditEnd: Called once with the item's latest edits when the user exits edit mode.
+	///     Defaults to `nil`.
 	///   - calendar: The calendar used by the week strip to determine week boundaries,
 	///     weekday order, and weekday symbols. Defaults to `Calendar.current`.
 	public init(
@@ -107,12 +153,20 @@ public struct WeekTimelineView: View {
 		hourHeight: Binding<CGFloat>,
 		onSelect: ((TimelineItem) -> Void)? = nil,
 		onReschedule: ((TimelineItem) -> Void)? = nil,
+		onCreate: ((_ start: Date, _ end: Date) -> Void)? = nil,
+		onDelete: ((TimelineItem) -> Void)? = nil,
+		onEditStart: ((TimelineItem) -> Void)? = nil,
+		onEditEnd: ((TimelineItem) -> Void)? = nil,
 		calendar: Calendar = .current
 	) {
 		self.items = items
 		self._selectedDate = selectedDate
 		self.onSelect = onSelect
 		self.onReschedule = onReschedule
+		self.onCreate = onCreate
+		self.onDelete = onDelete
+		self.onEditStart = onEditStart
+		self.onEditEnd = onEditEnd
 		self.calendar = calendar
 		self.externalHourHeight = hourHeight
 		_internalHourHeight = State(initialValue: hourHeight.wrappedValue)
@@ -128,7 +182,11 @@ public struct WeekTimelineView: View {
 				items: items,
 				hourHeight: hourHeight,
 				onSelect: onSelect,
-				onReschedule: onReschedule
+				onReschedule: onReschedule,
+				onCreate: onCreate,
+				onDelete: onDelete,
+				onEditStart: onEditStart,
+				onEditEnd: onEditEnd
 			)
 		}
 	}

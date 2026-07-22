@@ -42,6 +42,35 @@ public struct ZoomableDayTimelineView: View {
 	/// once per gesture, on release, not continuously while dragging.
 	public let onReschedule: ((TimelineItem) -> Void)?
 
+	/// Called when the user creates a new event by long-pressing (iOS) or click-dragging (macOS)
+	/// empty background, with the snapped, correctly-ordered start and end dates. Defaults to
+	/// `nil`, which leaves empty background non-interactive.
+	public let onCreate: ((_ start: Date, _ end: Date) -> Void)?
+
+	/// Called when the user taps the delete affordance shown on an editable event block while
+	/// it's in edit mode, with the item to delete. Only items with `TimelineItem.isEditable == true`
+	/// show this affordance. Fires immediately, with no confirmation — hosts that want to confirm
+	/// before removing data are responsible for that themselves. Deleting also exits edit mode, so
+	/// `onEditEnd` fires immediately before this — hosts don't need a separate rule for "the user
+	/// deleted it" vs. "the user finished editing it." Defaults to `nil`, which leaves event blocks
+	/// without a delete affordance.
+	public let onDelete: ((TimelineItem) -> Void)?
+
+	/// Called once when the user enters edit mode for an item, with its state at that moment,
+	/// before any edits happen this session. Lets a host prepare for a batch of upcoming edits
+	/// (e.g. snapshot current state for a possible revert, show an "editing" indicator) without
+	/// doing that work on every individual drag. Defaults to `nil`.
+	public let onEditStart: ((TimelineItem) -> Void)?
+
+	/// Called once when the user exits edit mode for an item — tapping elsewhere, tapping another
+	/// event, or otherwise leaving edit mode — with the item reflecting its latest edits. Useful
+	/// for one-shot wrap-up work that shouldn't run after every individual drag — e.g. a single
+	/// "saved" indicator after a user drags the start handle, then the end handle, rather than one
+	/// per handle. `onReschedule`/`onDelete` already cover persisting each edit as it happens; this
+	/// (and `onEditStart`) are notifications only, and aren't guaranteed to fire if the view is torn
+	/// down without an explicit exit (e.g. the host navigates away mid-edit). Defaults to `nil`.
+	public let onEditEnd: ((TimelineItem) -> Void)?
+
 	/// Creates a zoomable day timeline view that manages its own zoom level internally.
 	///
 	/// - Parameters:
@@ -51,6 +80,15 @@ public struct ZoomableDayTimelineView: View {
 	///     which leaves event blocks non-interactive.
 	///   - onReschedule: Called with the updated item when the user moves or resizes an editable
 	///     event block by dragging. Defaults to `nil`, which leaves event blocks non-draggable.
+	///   - onCreate: Called with the start and end dates when the user creates a new event on empty
+	///     background. Defaults to `nil`, which leaves empty background non-interactive.
+	///   - onDelete: Called with the item when the user taps an editable event block's delete
+	///     affordance. Also exits edit mode, firing `onEditEnd` immediately before this. Defaults
+	///     to `nil`, which leaves event blocks without a delete affordance.
+	///   - onEditStart: Called once with the item's state when the user enters edit mode. Defaults
+	///     to `nil`.
+	///   - onEditEnd: Called once with the item's latest edits when the user exits edit mode.
+	///     Defaults to `nil`.
 	///   - initialHourHeight: The vertical scale (points per hour) to start at, before any pinching.
 	///     Clamped to the same range the pinch gesture allows. Defaults to `60`. Exposed mainly so
 	///     previews/tests/screenshots can pin a zoom level without simulating a gesture.
@@ -58,11 +96,19 @@ public struct ZoomableDayTimelineView: View {
 		items: [TimelineItem],
 		onSelect: ((TimelineItem) -> Void)? = nil,
 		onReschedule: ((TimelineItem) -> Void)? = nil,
+		onCreate: ((_ start: Date, _ end: Date) -> Void)? = nil,
+		onDelete: ((TimelineItem) -> Void)? = nil,
+		onEditStart: ((TimelineItem) -> Void)? = nil,
+		onEditEnd: ((TimelineItem) -> Void)? = nil,
 		initialHourHeight: CGFloat = 60
 	) {
 		self.items = items
 		self.onSelect = onSelect
 		self.onReschedule = onReschedule
+		self.onCreate = onCreate
+		self.onDelete = onDelete
+		self.onEditStart = onEditStart
+		self.onEditEnd = onEditEnd
 		self.externalHourHeight = nil
 		_internalHourHeight = State(
 			initialValue: ZoomAnchor.clampedHourHeight(
@@ -88,15 +134,32 @@ public struct ZoomableDayTimelineView: View {
 	///     which leaves event blocks non-interactive.
 	///   - onReschedule: Called with the updated item when the user moves or resizes an editable
 	///     event block by dragging. Defaults to `nil`, which leaves event blocks non-draggable.
+	///   - onCreate: Called with the start and end dates when the user creates a new event on empty
+	///     background. Defaults to `nil`, which leaves empty background non-interactive.
+	///   - onDelete: Called with the item when the user taps an editable event block's delete
+	///     affordance. Also exits edit mode, firing `onEditEnd` immediately before this. Defaults
+	///     to `nil`, which leaves event blocks without a delete affordance.
+	///   - onEditStart: Called once with the item's state when the user enters edit mode. Defaults
+	///     to `nil`.
+	///   - onEditEnd: Called once with the item's latest edits when the user exits edit mode.
+	///     Defaults to `nil`.
 	public init(
 		items: [TimelineItem],
 		hourHeight: Binding<CGFloat>,
 		onSelect: ((TimelineItem) -> Void)? = nil,
-		onReschedule: ((TimelineItem) -> Void)? = nil
+		onReschedule: ((TimelineItem) -> Void)? = nil,
+		onCreate: ((_ start: Date, _ end: Date) -> Void)? = nil,
+		onDelete: ((TimelineItem) -> Void)? = nil,
+		onEditStart: ((TimelineItem) -> Void)? = nil,
+		onEditEnd: ((TimelineItem) -> Void)? = nil
 	) {
 		self.items = items
 		self.onSelect = onSelect
 		self.onReschedule = onReschedule
+		self.onCreate = onCreate
+		self.onDelete = onDelete
+		self.onEditStart = onEditStart
+		self.onEditEnd = onEditEnd
 		self.externalHourHeight = hourHeight
 		_internalHourHeight = State(initialValue: hourHeight.wrappedValue)
 	}
@@ -121,9 +184,20 @@ public struct ZoomableDayTimelineView: View {
 	@State private var hasScrolledToInitialPosition = false
 	@State private var editingItemID: UUID?
 	@GestureState private var pinchScale: CGFloat = 1
+	#if os(macOS)
+		@GestureState private var createDragState: (start: CGFloat, current: CGFloat)?
+	#else
+		/// Captured via `.onChanged` as soon as it's available, since `SequenceGesture`'s `.second`
+		/// case can still report a `nil` drag value at `.onEnded` for a long-press released with
+		/// essentially zero subsequent movement — a real risk for "long-press to create," unlike
+		/// `TimelineEventBlock.entryGesture`'s use of this same shape, which only needs `.second(true, _)`
+		/// to fire (no location required) and so never depended on the drag value being non-nil.
+		@State private var createStartY: CGFloat?
+	#endif
 
 	static let minHourHeight: CGFloat = 24
 	static let maxHourHeight: CGFloat = 200
+	private static let defaultCreateDurationMinutes = 60
 	private let labelWidth: CGFloat = 48
 	private let hours = Array(0...23)
 
@@ -180,11 +254,7 @@ public struct ZoomableDayTimelineView: View {
 				let scrollableContent =
 					ScrollView(.vertical) {
 						ZStack(alignment: .topLeading) {
-							hourLines(contentWidth: contentWidth)
-								.contentShape(Rectangle())
-								.onTapGesture {
-									editingItemID = nil
-								}
+							backgroundLayer(contentWidth: contentWidth, viewportHeight: viewportHeight)
 
 							ForEach(TimelineEventLayout.build(items: timedItems)) { layoutItem in
 								TimelineEventBlock(
@@ -198,10 +268,17 @@ public struct ZoomableDayTimelineView: View {
 									contentWidth: contentWidth,
 									onSelect: onSelect,
 									onReschedule: onReschedule,
+									onDelete: onDelete,
+									onEditStart: onEditStart,
+									onEditEnd: onEditEnd,
 									snapMinutes: snapMinutes(viewportHeight: viewportHeight),
 									editingItemID: $editingItemID
 								)
 							}
+
+							#if os(macOS)
+								createPreview(contentWidth: contentWidth, viewportHeight: viewportHeight)
+							#endif
 						}
 						.frame(height: effectiveHourHeight * 24)
 					}
@@ -282,6 +359,125 @@ public struct ZoomableDayTimelineView: View {
 				activeAnchorHour = nil
 			}
 	}
+
+	/// The hour-grid background, carrying the deselect-tap and (if `onCreate` is supplied)
+	/// create gesture. `.highPriorityGesture` on both platforms — unlike `TimelineEventBlock`'s
+	/// gestures, which stay at normal priority on iOS specifically to avoid claiming a touch a
+	/// two-finger pinch needs, this gesture's hit-testing region is the *entire* scrollable content
+	/// (not a small, isolated event block), which needs high priority to reliably win against
+	/// `ScrollView`'s own native single-finger pan. This doesn't reintroduce the pinch regression:
+	/// pinch is a separate two-finger gesture recognized via `.simultaneousGesture` on the
+	/// `ScrollView` ancestor, which runs regardless of what a single-finger descendant gesture does.
+	private func backgroundLayer(contentWidth: CGFloat, viewportHeight: CGFloat) -> some View {
+		hourLines(contentWidth: contentWidth)
+			.contentShape(Rectangle())
+			.highPriorityGesture(backgroundGesture(viewportHeight: viewportHeight))
+	}
+
+	/// Tap-vs-create disambiguation via `.exclusively(before:)` — the same combinator
+	/// `TimelineEventBlock` uses for tap-vs-drag, for the same reason: two independent gesture
+	/// modifiers competing for the same touch is what broke tap-to-select once already. The
+	/// attachment itself (`backgroundLayer`, above) is always the same shape; only the *value*
+	/// returned here varies with whether `onCreate` is supplied.
+	private func backgroundGesture(viewportHeight: CGFloat) -> some Gesture {
+		let deselect = TapGesture().onEnded { editingItemID = nil }
+		guard onCreate != nil else {
+			return AnyGesture(deselect.map { _ in () })
+		}
+
+		#if os(macOS)
+			let create =
+				DragGesture(minimumDistance: 5)
+				.updating($createDragState) { value, state, _ in
+					state = (value.startLocation.y, value.location.y)
+				}
+				.onEnded { value in
+					commitCreate(startY: value.startLocation.y, endY: value.location.y, viewportHeight: viewportHeight)
+				}
+		#else
+			let create =
+				LongPressGesture(minimumDuration: 0.4, maximumDistance: 10)
+				.sequenced(before: DragGesture(minimumDistance: 0))
+				.onChanged { value in
+					if case .second(true, let drag) = value, let drag {
+						createStartY = drag.startLocation.y
+					}
+				}
+				.onEnded { value in
+					defer { createStartY = nil }
+					guard case .second(true, let drag) = value else { return }
+					guard let startY = drag?.startLocation.y ?? createStartY else { return }
+					commitCreate(startY: startY, endY: nil, viewportHeight: viewportHeight)
+				}
+		#endif
+
+		return AnyGesture(deselect.exclusively(before: create).map { _ in () })
+	}
+
+	/// Shared by `commitCreate` and (on macOS) the live preview: converts a Y position to a date
+	/// and snaps it in one step, so the preview and the committed result never disagree.
+	private func snappedDate(atY y: CGFloat, snapMinutesValue: Int, calendar: Calendar) -> Date {
+		let raw = EventPositionMath.date(
+			atYOffset: y,
+			referenceDate: baseDate,
+			rangeStart: 0,
+			hourHeight: effectiveHourHeight,
+			calendar: calendar
+		)
+		return RescheduleMath.snapped(raw, toNearestMinutes: snapMinutesValue, calendar: calendar)
+	}
+
+	/// `endY == nil` (iOS long-press) always derives a default-duration event; `60` is divisible
+	/// by every value `snapMinutes(viewportHeight:)` can return, so the derived end is already
+	/// grid-aligned with no extra snap step needed.
+	private func commitCreate(startY: CGFloat, endY: CGFloat?, viewportHeight: CGFloat) {
+		let calendar = Calendar.current
+		let snapMinutesValue = snapMinutes(viewportHeight: viewportHeight)
+		let start = snappedDate(atY: startY, snapMinutesValue: snapMinutesValue, calendar: calendar)
+
+		guard let endY else {
+			let end = start.addingTimeInterval(TimeInterval(Self.defaultCreateDurationMinutes * 60))
+			onCreate?(start, end)
+			return
+		}
+
+		let end = snappedDate(atY: endY, snapMinutesValue: snapMinutesValue, calendar: calendar)
+		let ordered = RescheduleMath.orderedRange(start, end, minimumDuration: TimeInterval(snapMinutesValue * 60))
+		onCreate?(ordered.start, ordered.end)
+	}
+
+	#if os(macOS)
+		/// A lightweight, non-interactive preview of the in-progress click-drag-to-create, snapped
+		/// live to match what `commitCreate` will actually produce on release. `.allowsHitTesting(false)`
+		/// so it can never become a gesture-carrying view driven by its own output — the precondition
+		/// behind the drag-to-reschedule oscillation bug — even though it's rendered directly from
+		/// live `@GestureState`.
+		@ViewBuilder
+		private func createPreview(contentWidth: CGFloat, viewportHeight: CGFloat) -> some View {
+			if let createDragState {
+				let calendar = Calendar.current
+				let snapMinutesValue = snapMinutes(viewportHeight: viewportHeight)
+				let start = snappedDate(atY: createDragState.start, snapMinutesValue: snapMinutesValue, calendar: calendar)
+				let current = snappedDate(
+					atY: createDragState.current, snapMinutesValue: snapMinutesValue, calendar: calendar)
+				let ordered = RescheduleMath.orderedRange(
+					start, current, minimumDuration: TimeInterval(snapMinutesValue * 60))
+				let topY = EventPositionMath.yOffset(
+					of: ordered.start, referenceDate: baseDate, rangeStart: 0, hourHeight: effectiveHourHeight,
+					calendar: calendar)
+				let bottomY = EventPositionMath.yOffset(
+					of: ordered.end, referenceDate: baseDate, rangeStart: 0, hourHeight: effectiveHourHeight,
+					calendar: calendar)
+
+				RoundedRectangle(cornerRadius: 4)
+					.fill(Color.accentColor.opacity(0.25))
+					.overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.accentColor, lineWidth: 1.5))
+					.frame(width: contentWidth - 16, height: max(bottomY - topY, 4))
+					.position(x: labelWidth + 8 + (contentWidth - 16) / 2, y: (topY + bottomY) / 2)
+					.allowsHitTesting(false)
+			}
+		}
+	#endif
 
 	private var allDaySection: some View {
 		VStack(alignment: .leading, spacing: 4) {

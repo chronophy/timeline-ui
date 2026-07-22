@@ -57,3 +57,72 @@ import Testing
 
 	#expect(offset == 2.5 * hourHeight)
 }
+
+// MARK: - date(atYOffset:...)
+
+@Test func `date(atYOffset:) round-trips with yOffset`() throws {
+	let calendar = Calendar.current
+	let day = calendar.date(from: DateComponents(year: 2026, month: 7, day: 21))!
+	let referenceDate = calendar.date(bySettingHour: 9, minute: 25, second: 0, of: day)!
+	let eventStart = calendar.date(bySettingHour: 14, minute: 15, second: 0, of: day)!
+	let hourHeight: CGFloat = 60
+
+	let offset = EventPositionMath.yOffset(
+		of: eventStart,
+		referenceDate: referenceDate,
+		rangeStart: 0,
+		hourHeight: hourHeight,
+		calendar: calendar
+	)
+	let roundTripped = EventPositionMath.date(
+		atYOffset: offset,
+		referenceDate: referenceDate,
+		rangeStart: 0,
+		hourHeight: hourHeight,
+		calendar: calendar
+	)
+
+	#expect(roundTripped == eventStart)
+}
+
+@Test func `date(atYOffset:) resolves a negative offset to a time before rangeStart`() throws {
+	let calendar = Calendar.current
+	let day = calendar.date(from: DateComponents(year: 2026, month: 7, day: 21))!
+	let referenceDate = calendar.date(bySettingHour: 7, minute: 0, second: 0, of: day)!
+	let hourHeight: CGFloat = 60
+
+	let date = EventPositionMath.date(
+		atYOffset: -60,
+		referenceDate: referenceDate,
+		rangeStart: 7,
+		hourHeight: hourHeight,
+		calendar: calendar
+	)
+
+	#expect(date == calendar.date(bySettingHour: 6, minute: 0, second: 0, of: day)!)
+}
+
+@Test func `date(atYOffset:) round-trips with a non-zero rangeStart`() throws {
+	let calendar = Calendar.current
+	let day = calendar.date(from: DateComponents(year: 2026, month: 7, day: 21))!
+	let referenceDate = calendar.date(bySettingHour: 7, minute: 0, second: 0, of: day)!
+	let eventStart = calendar.date(bySettingHour: 9, minute: 30, second: 0, of: day)!
+	let hourHeight: CGFloat = 60
+
+	let offset = EventPositionMath.yOffset(
+		of: eventStart,
+		referenceDate: referenceDate,
+		rangeStart: 7,
+		hourHeight: hourHeight,
+		calendar: calendar
+	)
+	let roundTripped = EventPositionMath.date(
+		atYOffset: offset,
+		referenceDate: referenceDate,
+		rangeStart: 7,
+		hourHeight: hourHeight,
+		calendar: calendar
+	)
+
+	#expect(roundTripped == eventStart)
+}
