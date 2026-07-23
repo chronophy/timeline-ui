@@ -49,6 +49,9 @@ public struct ZoomableDayTimelineView: View {
 	/// The events to display on the timeline.
 	public let items: [TimelineItem]
 
+	/// The calendar used for hour-range/snap/create-and-format logic.
+	let calendar: Calendar
+
 	/// Called when the user taps an event block, with the tapped item.
 	public let onSelect: ((TimelineItem) -> Void)?
 
@@ -110,6 +113,8 @@ public struct ZoomableDayTimelineView: View {
 	///   - initialEditingItemID: The `id` of an item to start already in edit mode, matching
 	///     `TimelineItem.id`. Defaults to `nil` (nothing starts in edit mode). Exposed mainly so
 	///     previews/tests/screenshots can capture edit mode without simulating a gesture.
+	///   - calendar: The calendar used for hour-range/snap/create-and-format logic. Defaults to
+	///     `Calendar.current`.
 	public init(
 		items: [TimelineItem],
 		onSelect: ((TimelineItem) -> Void)? = nil,
@@ -119,7 +124,8 @@ public struct ZoomableDayTimelineView: View {
 		onEditStart: ((TimelineItem) -> Void)? = nil,
 		onEditEnd: ((TimelineItem) -> Void)? = nil,
 		initialHourHeight: CGFloat = 60,
-		initialEditingItemID: UUID? = nil
+		initialEditingItemID: UUID? = nil,
+		calendar: Calendar = .current
 	) {
 		self.items = items
 		self.onSelect = onSelect
@@ -128,6 +134,7 @@ public struct ZoomableDayTimelineView: View {
 		self.onDelete = onDelete
 		self.onEditStart = onEditStart
 		self.onEditEnd = onEditEnd
+		self.calendar = calendar
 		self.externalHourHeight = nil
 		_internalHourHeight = State(
 			initialValue: ZoomAnchor.clampedHourHeight(
@@ -166,6 +173,8 @@ public struct ZoomableDayTimelineView: View {
 	///   - initialEditingItemID: The `id` of an item to start already in edit mode, matching
 	///     `TimelineItem.id`. Defaults to `nil` (nothing starts in edit mode). Exposed mainly so
 	///     previews/tests/screenshots can capture edit mode without simulating a gesture.
+	///   - calendar: The calendar used for hour-range/snap/create-and-format logic. Defaults to
+	///     `Calendar.current`.
 	public init(
 		items: [TimelineItem],
 		hourHeight: Binding<CGFloat>,
@@ -175,7 +184,8 @@ public struct ZoomableDayTimelineView: View {
 		onDelete: ((TimelineItem) -> Void)? = nil,
 		onEditStart: ((TimelineItem) -> Void)? = nil,
 		onEditEnd: ((TimelineItem) -> Void)? = nil,
-		initialEditingItemID: UUID? = nil
+		initialEditingItemID: UUID? = nil,
+		calendar: Calendar = .current
 	) {
 		self.items = items
 		self.onSelect = onSelect
@@ -184,6 +194,7 @@ public struct ZoomableDayTimelineView: View {
 		self.onDelete = onDelete
 		self.onEditStart = onEditStart
 		self.onEditEnd = onEditEnd
+		self.calendar = calendar
 		self.externalHourHeight = hourHeight
 		_internalHourHeight = State(initialValue: hourHeight.wrappedValue)
 		_editingItemID = State(initialValue: initialEditingItemID)
@@ -252,7 +263,6 @@ public struct ZoomableDayTimelineView: View {
 	}
 
 	private func initialAnchorHour() -> CGFloat {
-		let calendar = Calendar.current
 		guard let firstTimed = timedItems.first else {
 			let hour = calendar.component(.hour, from: baseDate)
 			return CGFloat(max(0, hour - 1))
@@ -462,7 +472,6 @@ public struct ZoomableDayTimelineView: View {
 	/// by every value `snapMinutes(viewportHeight:)` can return, so the derived end is already
 	/// grid-aligned with no extra snap step needed.
 	private func commitCreate(startY: CGFloat, endY: CGFloat?, viewportHeight: CGFloat) {
-		let calendar = Calendar.current
 		let snapMinutesValue = snapMinutes(viewportHeight: viewportHeight)
 		let start = snappedDate(atY: startY, snapMinutesValue: snapMinutesValue, calendar: calendar)
 
@@ -486,7 +495,6 @@ public struct ZoomableDayTimelineView: View {
 		@ViewBuilder
 		private func createPreview(contentWidth: CGFloat, viewportHeight: CGFloat) -> some View {
 			if let createDragState {
-				let calendar = Calendar.current
 				let snapMinutesValue = snapMinutes(viewportHeight: viewportHeight)
 				let start = snappedDate(
 					atY: createDragState.start,
@@ -573,7 +581,6 @@ public struct ZoomableDayTimelineView: View {
 	private func formatHour(_ hour: Int) -> String {
 		let formatter = DateFormatter()
 		formatter.dateFormat = "HH:mm"
-		let calendar = Calendar.current
 		let date = calendar.date(bySettingHour: hour, minute: 0, second: 0, of: Date()) ?? Date()
 		return formatter.string(from: date)
 	}

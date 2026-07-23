@@ -186,7 +186,8 @@ public struct WeekTimelineView: View {
 				onCreate: onCreate,
 				onDelete: onDelete,
 				onEditStart: onEditStart,
-				onEditEnd: onEditEnd
+				onEditEnd: onEditEnd,
+				calendar: calendar
 			)
 		}
 	}
