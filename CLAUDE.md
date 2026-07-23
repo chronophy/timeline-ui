@@ -109,7 +109,7 @@ ZoomableDayTimelineView(
 
 While an item is being dragged or resized it's in "edit mode": resize handles appear on the
 block, and (if `onDelete` is supplied) a delete button does too. Edit mode is a small state
-machine (long-press on iOS / click on macOS → edit mode → tap elsewhere → view mode), coordinated
+machine (long-press on iOS / double-click on macOS → edit mode → tap elsewhere → view mode), coordinated
 across sibling `TimelineEventBlock`s via a shared `editingItemID: UUID?` binding owned by
 `ZoomableDayTimelineView`. `initialEditingItemID` seeds it for previews/tests without simulating
 a gesture (see `zoomable-day-editing` in `RenderPreviews/main.swift`).

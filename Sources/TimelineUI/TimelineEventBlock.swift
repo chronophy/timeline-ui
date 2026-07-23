@@ -195,14 +195,34 @@ enum RescheduleMath {
 	}
 }
 
+/// Pure, testable resolution of the next `editingItemID` for a gesture on a block — the decision
+/// logic behind `handleTap`, `handleDoubleTap`, and iOS's `entryGesture` long-press, factored out
+/// so it's coverable without a gesture-simulation harness (SwiftUI has none to test against
+/// directly).
+enum EditModeTapResolution {
+	/// A single tap/click never *enters* edit mode by itself. It only ever leaves the current
+	/// `editingItemID` alone (if this block was already the one editing) or clears it (any other
+	/// case — a different block was editing, or nothing was).
+	static func afterTap(current: UUID?, tappedID: UUID) -> UUID? {
+		current == tappedID ? current : nil
+	}
+
+	/// The gesture that actually enters edit mode — a macOS double-click or an iOS long-press —
+	/// enters it for the tapped block, unless editing isn't allowed for it, in which case the
+	/// current `editingItemID` is left untouched rather than cleared, matching both call sites'
+	/// early-return-without-side-effect on a non-editable block.
+	static func afterEditEntryGesture(current: UUID?, tappedID: UUID, canEnterEditMode: Bool) -> UUID? {
+		canEnterEditMode ? tappedID : current
+	}
+}
+
 /// Renders one event. Drag-to-reschedule is a small state machine, coordinated across sibling
 /// blocks via the shared `editingItemID` binding (owned by the parent timeline view):
 ///
-/// - At rest, a block is read-only: tap selects (`onSelect`), nothing else.
-/// - On iOS, a long-press on an editable block's body enters edit mode. On macOS, a plain click
-///   enters edit mode directly (in addition to selecting) — clicking and long-pressing are
-///   already unambiguous on macOS, unlike touch, where a resting/scrolling finger looks the same
-///   as the start of a long-press.
+/// - At rest, a block is read-only: tap/click selects (`onSelect`), nothing else.
+/// - On iOS, a long-press on an editable block's body enters edit mode. On macOS, a double-click
+///   enters edit mode — a single click only selects, so clicking through several events to see
+///   their details doesn't drag each one into edit mode along the way.
 /// - While a block is the one named by `editingItemID`, its resize handles are visible and it
 ///   (along with its handles) accepts plain drags — no further long-press needed.
 /// - Tapping/clicking anything else (another block, or empty background — see
@@ -222,8 +242,9 @@ struct TimelineEventBlock: View {
 	/// Deleting also exits edit mode, so `onEditEnd` fires immediately before this — hosts don't
 	/// need a separate rule for "the user deleted it" vs. "the user finished editing it."
 	let onDelete: ((TimelineItem) -> Void)?
-	/// Called once when the user enters edit mode for this item — long-pressing (iOS) or clicking
-	/// (macOS) it — with its state at that moment, before any edits happen this session. Lets a
+	/// Called once when the user enters edit mode for this item — long-pressing (iOS) or
+	/// double-clicking (macOS) it — with its state at that moment, before any edits happen this
+	/// session. Lets a
 	/// host prepare for a batch of upcoming edits (e.g. snapshot current state for a possible
 	/// revert, show an "editing" indicator) without doing that work on every individual drag.
 	let onEditStart: ((TimelineItem) -> Void)?
@@ -540,16 +561,42 @@ struct TimelineEventBlock: View {
 	/// the same shape regardless of `isRescheduleEnabled`/`isEditing`; only the *value* passed to
 	/// `.exclusively(before:)`'s second branch varies, and `beginDragIfNeeded`/`entryGesture`'s own
 	/// internal `isRescheduleEnabled` guards make the drag portion inert for non-editable items.
+	///
+	/// On macOS the tap portion is itself a double-tap-before-single-tap exclusive pair: SwiftUI
+	/// tries the double-click first and only falls back to the single click once that fails to
+	/// complete within the system's inter-click window, so a plain click never also fires the
+	/// double-click handler. iOS has no click/double-click distinction to make here — entering
+	/// edit mode there is already gated behind `entryGesture`'s long-press.
+	///
+	/// While resting (not yet editing) on macOS, `secondary` is an unreachable `minimumDistance`
+	/// drag rather than `entryGesture` — body drags no longer enter edit mode by themselves there.
+	/// Edit is only ever entered explicitly via `handleDoubleTap()`; see that function's doc for
+	/// why a bare click-and-drag used to be able to move an event without one.
 	private func cardGesture() -> some Gesture {
 		let secondary: AnyGesture<Void>
-		if isEditing {
-			secondary = AnyGesture(dragGesture(mode: .move, gestureState: $moveDragState).map { _ in () })
-		} else {
-			secondary = AnyGesture(entryGesture(mode: .move, gestureState: $moveDragState).map { _ in () })
-		}
-		return TapGesture()
-			.onEnded { handleTap() }
-			.exclusively(before: secondary)
+		#if os(macOS)
+			if isEditing {
+				secondary = AnyGesture(dragGesture(mode: .move, gestureState: $moveDragState).map { _ in () })
+			} else {
+				secondary = AnyGesture(
+					DragGesture(minimumDistance: .greatestFiniteMagnitude).map { _ in () }
+				)
+			}
+			let tap = TapGesture(count: 2)
+				.onEnded { handleDoubleTap() }
+				.exclusively(before: TapGesture().onEnded { handleTap() })
+			return AnyGesture(tap.map { _ in () })
+				.exclusively(before: secondary)
+		#else
+			if isEditing {
+				secondary = AnyGesture(dragGesture(mode: .move, gestureState: $moveDragState).map { _ in () })
+			} else {
+				secondary = AnyGesture(entryGesture(mode: .move, gestureState: $moveDragState).map { _ in () })
+			}
+			return TapGesture()
+				.onEnded { handleTap() }
+				.exclusively(before: secondary)
+		#endif
 	}
 
 	private func cardContent(height: CGFloat) -> some View {
@@ -667,20 +714,32 @@ struct TimelineEventBlock: View {
 		}
 	}
 
+	/// Selects only — never itself enters edit mode. On macOS that's `entryGesture`'s job via
+	/// `handleDoubleTap()` below; on iOS it's `entryGesture`'s long-press. Still responsible for
+	/// *exiting* edit mode when tapping/clicking a block other than the one currently editing,
+	/// matching background taps (see `ZoomableDayTimelineView`).
 	private func handleTap() {
 		onSelect?(item)
-		guard canEnterEditMode else {
-			editingItemID = nil
-			return
-		}
-		#if os(macOS)
-			editingItemID = item.id
-		#else
-			if editingItemID != item.id {
-				editingItemID = nil
-			}
-		#endif
+		editingItemID = EditModeTapResolution.afterTap(current: editingItemID, tappedID: item.id)
 	}
+
+	#if os(macOS)
+		/// The only way to enter edit mode on macOS — deliberately the sole gate, matching iOS's
+		/// long-press. An earlier version also let a click-and-drag on a resting body enter edit
+		/// mode and start moving the event in one motion (no double-click needed); that made it too
+		/// easy to accidentally drag an event while just meaning to click through several of them,
+		/// since a click and the start of a drag look identical until the mouse has already moved.
+		/// `.exclusively(before:)` only delivers one of the two tap gestures' `onEnded`, so a
+		/// successful double-click never also fires `handleTap`'s `onSelect` — entering edit mode
+		/// and selecting are deliberately distinct actions here.
+		private func handleDoubleTap() {
+			editingItemID = EditModeTapResolution.afterEditEntryGesture(
+				current: editingItemID,
+				tappedID: item.id,
+				canEnterEditMode: canEnterEditMode
+			)
+		}
+	#endif
 
 	/// A plain drag, no long-press — used once a block is already in edit mode, for both the
 	/// body (move) and either handle (resize).
@@ -697,26 +756,12 @@ struct TimelineEventBlock: View {
 			}
 	}
 
-	/// The gesture that enters edit mode from a resting (not-yet-editing) block, on the body
-	/// only (handles don't exist yet at this point). A plain click has a pixel or two of
-	/// incidental jitter, so `minimumDistance: 0` would misfire on ordinary clicks meant for
-	/// `onTapGesture`; a small non-zero threshold lets clicks fall through to the tap gesture
-	/// while a deliberate click-and-drag engages a move immediately, with no hold delay.
-	private func entryGesture(mode: DragMode, gestureState: GestureState<CGFloat?>) -> some Gesture {
-		#if os(macOS)
-			DragGesture(minimumDistance: 5)
-				.updating(gestureState) { value, state, _ in
-					state = value.translation.height
-				}
-				.onChanged { _ in
-					guard canEnterEditMode else { return }
-					editingItemID = item.id
-					beginDragIfNeeded(mode: mode)
-				}
-				.onEnded { value in
-					commitDrag(mode: mode, translationY: value.translation.height)
-				}
-		#else
+	#if !os(macOS)
+		/// The gesture that enters edit mode from a resting (not-yet-editing) block, on the body
+		/// only (handles don't exist yet at this point) — iOS only. macOS has no equivalent: a
+		/// resting body carries no drag-recognizing gesture at all there, so edit mode can only be
+		/// entered via `handleDoubleTap()`; see its doc for why.
+		private func entryGesture(mode: DragMode, gestureState: GestureState<CGFloat?>) -> some Gesture {
 			LongPressGesture(minimumDuration: 0.4, maximumDistance: 10)
 				.sequenced(before: DragGesture(minimumDistance: 0))
 				.updating(gestureState) { value, state, _ in
@@ -725,9 +770,12 @@ struct TimelineEventBlock: View {
 					}
 				}
 				.onChanged { value in
-					guard canEnterEditMode else { return }
 					if case .second(true, _) = value {
-						editingItemID = item.id
+						editingItemID = EditModeTapResolution.afterEditEntryGesture(
+							current: editingItemID,
+							tappedID: item.id,
+							canEnterEditMode: canEnterEditMode
+						)
 						beginDragIfNeeded(mode: mode)
 					}
 				}
@@ -738,8 +786,8 @@ struct TimelineEventBlock: View {
 						activeDrag = nil
 					}
 				}
-		#endif
-	}
+		}
+	#endif
 
 	private func beginDragIfNeeded(mode: DragMode) {
 		guard isRescheduleEnabled, activeDrag == nil else { return }
