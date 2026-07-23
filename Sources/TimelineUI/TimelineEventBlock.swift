@@ -9,6 +9,16 @@ enum EventPositionMath {
 	/// component matters: the `.hour` component alone discards `referenceDate`'s minutes, and
 	/// re-deriving the offset from a raw `timeIntervalSince(referenceDate)` delta then leaks
 	/// those discarded minutes back in as a fixed error applied to every event on the timeline.
+	///
+	/// `date`'s own hour/minute/second are read directly via `calendar.dateComponents(_:from:)`
+	/// (a single-date decomposition, not a diff) rather than via `timeIntervalSince`/
+	/// `Calendar.dateComponents(_:from:to:)`/`Calendar`'s duration-based `.hour`/`.minute`
+	/// addition — all of those measure real elapsed seconds, which is wrong by the DST offset on
+	/// transition days (a 16:00 event on a 23-hour "spring forward" day is only 15 real elapsed
+	/// hours after midnight). Reading `date`'s wall-clock fields directly sidesteps that; only the
+	/// whole-day offset between `referenceDate`'s day and `date`'s day (safe: `Calendar`'s `.day`
+	/// addition/diff is wall-clock-preserving, unlike its `.hour`/`.minute` addition) is derived
+	/// relative to `referenceDate`.
 	static func yOffset(
 		of date: Date,
 		referenceDate: Date,
@@ -16,15 +26,24 @@ enum EventPositionMath {
 		hourHeight: CGFloat,
 		calendar: Calendar
 	) -> CGFloat {
-		let startOfDay = calendar.startOfDay(for: referenceDate)
-		let hoursSinceStartOfDay = date.timeIntervalSince(startOfDay) / 3600.0
+		let startOfReferenceDay = calendar.startOfDay(for: referenceDate)
+		let startOfDateDay = calendar.startOfDay(for: date)
+		let daysBetween = calendar.dateComponents([.day], from: startOfReferenceDay, to: startOfDateDay).day ?? 0
+		let timeOfDay = calendar.dateComponents([.hour, .minute, .second], from: date)
+		let hoursSinceStartOfDay =
+			Double(daysBetween) * 24
+			+ Double(timeOfDay.hour ?? 0)
+			+ Double(timeOfDay.minute ?? 0) / 60.0
+			+ Double(timeOfDay.second ?? 0) / 3600.0
 		let hoursFromRangeStart = hoursSinceStartOfDay - Double(rangeStart)
 		return CGFloat(hoursFromRangeStart) * hourHeight
 	}
 
 	/// Exact inverse of `yOffset(of:referenceDate:rangeStart:hourHeight:calendar:)` — unsnapped,
 	/// by design (snapping is a separate, later step, same layering used throughout this file:
-	/// raw geometry math never snaps itself).
+	/// raw geometry math never snaps itself). Reconstructs via `calendar.date(bySettingHour:...)`
+	/// (wall-clock component assignment) rather than adding a raw duration, for the same DST
+	/// reason as `yOffset` above.
 	static func date(
 		atYOffset yOffset: CGFloat,
 		referenceDate: Date,
@@ -32,10 +51,17 @@ enum EventPositionMath {
 		hourHeight: CGFloat,
 		calendar: Calendar
 	) -> Date {
-		let hoursFromRangeStart = Double(yOffset / hourHeight)
-		let hoursSinceStartOfDay = hoursFromRangeStart + Double(rangeStart)
-		let startOfDay = calendar.startOfDay(for: referenceDate)
-		return startOfDay.addingTimeInterval(hoursSinceStartOfDay * 3600)
+		let totalHours = Double(yOffset / hourHeight) + Double(rangeStart)
+		let dayOffset = Int((totalHours / 24).rounded(.down))
+		let hoursIntoDay = totalHours - Double(dayOffset) * 24
+		let totalSecondsIntoDay = Int((hoursIntoDay * 3600).rounded())
+		let hours = totalSecondsIntoDay / 3600
+		let remainder = totalSecondsIntoDay % 3600
+		let minutes = remainder / 60
+		let seconds = remainder % 60
+		let startOfReferenceDay = calendar.startOfDay(for: referenceDate)
+		let targetDay = calendar.date(byAdding: .day, value: dayOffset, to: startOfReferenceDay) ?? startOfReferenceDay
+		return calendar.date(bySettingHour: hours, minute: minutes, second: seconds, of: targetDay) ?? referenceDate
 	}
 }
 
@@ -54,12 +80,39 @@ enum RescheduleMath {
 		}
 	}
 
+	/// `date`'s minute-of-day, read directly via `calendar.dateComponents(_:from:)` rather than a
+	/// diff against `startOfDay` — see the DST note on `date(atMinuteOfDay:near:calendar:)` below.
+	private static func minuteOfDay(of date: Date, calendar: Calendar) -> Int {
+		let components = calendar.dateComponents([.hour, .minute], from: date)
+		return (components.hour ?? 0) * 60 + (components.minute ?? 0)
+	}
+
+	/// Reconstructs a `Date` from a minute-of-day value — which may fall outside `0..<1440`,
+	/// rolling over into an adjacent day — relative to `date`'s own calendar day.
+	///
+	/// Built via wall-clock component assignment (`calendar.date(bySettingHour:minute:second:of:)`
+	/// for the in-day remainder, `Calendar`'s `.day` addition — verified wall-clock-preserving,
+	/// unlike its `.hour`/`.minute` addition — for any day rollover) rather than adding a raw
+	/// duration (`addingTimeInterval`, or `Calendar`'s own duration-based `.minute`/`.hour`
+	/// addition): both of those are wrong by the DST offset whenever `date`'s day has one.
+	private static func date(atMinuteOfDay minuteOfDay: Int, near date: Date, calendar: Calendar) -> Date {
+		let dayOffset = Int((Double(minuteOfDay) / 1440.0).rounded(.down))
+		let minutesIntoDay = minuteOfDay - dayOffset * 1440
+		let startOfDay = calendar.startOfDay(for: date)
+		let targetDay = calendar.date(byAdding: .day, value: dayOffset, to: startOfDay) ?? startOfDay
+		return calendar.date(
+			bySettingHour: minutesIntoDay / 60,
+			minute: minutesIntoDay % 60,
+			second: 0,
+			of: targetDay
+		) ?? date
+	}
+
 	static func snapped(_ date: Date, toNearestMinutes minutes: Int, calendar: Calendar) -> Date {
 		guard minutes > 0 else { return date }
-		let startOfDay = calendar.startOfDay(for: date)
-		let minutesSinceStartOfDay = date.timeIntervalSince(startOfDay) / 60
-		let roundedMinutes = (minutesSinceStartOfDay / Double(minutes)).rounded() * Double(minutes)
-		return calendar.date(byAdding: .minute, value: Int(roundedMinutes), to: startOfDay) ?? date
+		let current = minuteOfDay(of: date, calendar: calendar)
+		let rounded = Int((Double(current) / Double(minutes)).rounded() * Double(minutes))
+		return self.date(atMinuteOfDay: rounded, near: date, calendar: calendar)
 	}
 
 	/// Snaps only the resulting start; end is derived as `start + originalDuration` so a move
@@ -74,8 +127,12 @@ enum RescheduleMath {
 		calendar: Calendar
 	) -> (start: Date, end: Date) {
 		guard translationY != 0 else { return (originalStart, originalEnd) }
-		let minutesDelta = Double(translationY / hourHeight * 60)
-		let rawStart = originalStart.addingTimeInterval(minutesDelta * 60)
+		let minutesDelta = Int((translationY / hourHeight * 60).rounded())
+		let rawStart = date(
+			atMinuteOfDay: minuteOfDay(of: originalStart, calendar: calendar) + minutesDelta,
+			near: originalStart,
+			calendar: calendar
+		)
 		let snappedStart = snapped(rawStart, toNearestMinutes: snapMinutes, calendar: calendar)
 		let duration = originalEnd.timeIntervalSince(originalStart)
 		return (snappedStart, snappedStart.addingTimeInterval(duration))
@@ -94,8 +151,12 @@ enum RescheduleMath {
 		calendar: Calendar
 	) -> Date {
 		guard translationY != 0 else { return originalStart }
-		let minutesDelta = Double(translationY / hourHeight * 60)
-		let rawStart = originalStart.addingTimeInterval(minutesDelta * 60)
+		let minutesDelta = Int((translationY / hourHeight * 60).rounded())
+		let rawStart = date(
+			atMinuteOfDay: minuteOfDay(of: originalStart, calendar: calendar) + minutesDelta,
+			near: originalStart,
+			calendar: calendar
+		)
 		let snappedStart = snapped(rawStart, toNearestMinutes: snapMinutes, calendar: calendar)
 		let minDuration = min(Double(snapMinutes) * 60, originalEnd.timeIntervalSince(originalStart))
 		let latestAllowedStart = originalEnd.addingTimeInterval(-minDuration)
@@ -111,8 +172,12 @@ enum RescheduleMath {
 		calendar: Calendar
 	) -> Date {
 		guard translationY != 0 else { return originalEnd }
-		let minutesDelta = Double(translationY / hourHeight * 60)
-		let rawEnd = originalEnd.addingTimeInterval(minutesDelta * 60)
+		let minutesDelta = Int((translationY / hourHeight * 60).rounded())
+		let rawEnd = date(
+			atMinuteOfDay: minuteOfDay(of: originalEnd, calendar: calendar) + minutesDelta,
+			near: originalEnd,
+			calendar: calendar
+		)
 		let snappedEnd = snapped(rawEnd, toNearestMinutes: snapMinutes, calendar: calendar)
 		let minDuration = min(Double(snapMinutes) * 60, originalEnd.timeIntervalSince(originalStart))
 		let earliestAllowedEnd = originalStart.addingTimeInterval(minDuration)
