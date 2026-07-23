@@ -70,6 +70,19 @@ private func time(_ hour: Int, _ minute: Int, calendar: Calendar) -> Date {
 	#expect(snapped == expected)
 }
 
+@Test func `snapped keeps a 16:00 time anchored to hour 16 on the US spring-forward day`() throws {
+	var calendar = Calendar(identifier: .gregorian)
+	calendar.locale = Locale(identifier: "en_US_POSIX")
+	calendar.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+	// 2026-03-08 is a US "spring forward" day: 2:00 AM -> 3:00 AM, a 23-hour local day.
+	let day = calendar.date(from: DateComponents(year: 2026, month: 3, day: 8))!
+	let time = calendar.date(bySettingHour: 16, minute: 7, second: 0, of: day)!
+
+	let snapped = RescheduleMath.snapped(time, toNearestMinutes: 15, calendar: calendar)
+
+	#expect(snapped == calendar.date(bySettingHour: 16, minute: 0, second: 0, of: day)!)
+}
+
 // MARK: - movedDates
 
 @Test func `movedDates preserves duration exactly across a snap`() throws {

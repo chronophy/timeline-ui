@@ -126,3 +126,56 @@ import Testing
 
 	#expect(roundTripped == eventStart)
 }
+
+// MARK: - DST
+
+private func losAngelesCalendar() -> Calendar {
+	var calendar = Calendar(identifier: .gregorian)
+	calendar.locale = Locale(identifier: "en_US_POSIX")
+	calendar.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+	return calendar
+}
+
+@Test func `yOffset places a 16:00 event at hour 16 on the US spring-forward day`() throws {
+	let calendar = losAngelesCalendar()
+	// 2026-03-08 is a US "spring forward" day: 2:00 AM -> 3:00 AM, a 23-hour local day.
+	let day = calendar.date(from: DateComponents(year: 2026, month: 3, day: 8))!
+	let referenceDate = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: day)!
+	let eventStart = calendar.date(bySettingHour: 16, minute: 0, second: 0, of: day)!
+	let hourHeight: CGFloat = 60
+
+	let offset = EventPositionMath.yOffset(
+		of: eventStart,
+		referenceDate: referenceDate,
+		rangeStart: 0,
+		hourHeight: hourHeight,
+		calendar: calendar
+	)
+
+	#expect(offset == 16 * hourHeight)
+}
+
+@Test func `date(atYOffset:) round-trips across the US spring-forward day`() throws {
+	let calendar = losAngelesCalendar()
+	let day = calendar.date(from: DateComponents(year: 2026, month: 3, day: 8))!
+	let referenceDate = calendar.date(bySettingHour: 9, minute: 0, second: 0, of: day)!
+	let eventStart = calendar.date(bySettingHour: 16, minute: 0, second: 0, of: day)!
+	let hourHeight: CGFloat = 60
+
+	let offset = EventPositionMath.yOffset(
+		of: eventStart,
+		referenceDate: referenceDate,
+		rangeStart: 0,
+		hourHeight: hourHeight,
+		calendar: calendar
+	)
+	let roundTripped = EventPositionMath.date(
+		atYOffset: offset,
+		referenceDate: referenceDate,
+		rangeStart: 0,
+		hourHeight: hourHeight,
+		calendar: calendar
+	)
+
+	#expect(roundTripped == eventStart)
+}
