@@ -18,6 +18,21 @@ enum ZoomAnchor {
 	}
 }
 
+/// Pure, testable logic for clearing a stale `editingItemID`.
+///
+/// `ZoomableDayTimelineView` keeps a stable identity as `WeekTimelineView` pages between days (so
+/// scroll/zoom position persists), which means `editingItemID` isn't automatically reset when
+/// `items` is swapped for a new day's events. A leftover id matching nothing in the new day's
+/// `items` wouldn't show any edit UI (nothing matches it), but `scrollDisabled` is gated purely on
+/// `editingItemID != nil`, so scroll would stay frozen with no visible cause and no way to
+/// un-freeze it short of the id happening to be reused.
+enum EditingItemReset {
+	static func resolved(current: UUID?, items: [TimelineItem]) -> UUID? {
+		guard let current, items.contains(where: { $0.id == current }) else { return nil }
+		return current
+	}
+}
+
 /// A full-day timeline view with pinch-to-zoom on the hour grid.
 ///
 /// Unlike ``DayTimelineView``, which shrinks or expands the visible hour range to
@@ -33,6 +48,9 @@ enum ZoomAnchor {
 public struct ZoomableDayTimelineView: View {
 	/// The events to display on the timeline.
 	public let items: [TimelineItem]
+
+	/// The calendar used for hour-range/snap/create-and-format logic.
+	let calendar: Calendar
 
 	/// Called when the user taps an event block, with the tapped item.
 	public let onSelect: ((TimelineItem) -> Void)?
@@ -95,6 +113,8 @@ public struct ZoomableDayTimelineView: View {
 	///   - initialEditingItemID: The `id` of an item to start already in edit mode, matching
 	///     `TimelineItem.id`. Defaults to `nil` (nothing starts in edit mode). Exposed mainly so
 	///     previews/tests/screenshots can capture edit mode without simulating a gesture.
+	///   - calendar: The calendar used for hour-range/snap/create-and-format logic. Defaults to
+	///     `Calendar.current`.
 	public init(
 		items: [TimelineItem],
 		onSelect: ((TimelineItem) -> Void)? = nil,
@@ -104,7 +124,8 @@ public struct ZoomableDayTimelineView: View {
 		onEditStart: ((TimelineItem) -> Void)? = nil,
 		onEditEnd: ((TimelineItem) -> Void)? = nil,
 		initialHourHeight: CGFloat = 60,
-		initialEditingItemID: UUID? = nil
+		initialEditingItemID: UUID? = nil,
+		calendar: Calendar = .current
 	) {
 		self.items = items
 		self.onSelect = onSelect
@@ -113,6 +134,7 @@ public struct ZoomableDayTimelineView: View {
 		self.onDelete = onDelete
 		self.onEditStart = onEditStart
 		self.onEditEnd = onEditEnd
+		self.calendar = calendar
 		self.externalHourHeight = nil
 		_internalHourHeight = State(
 			initialValue: ZoomAnchor.clampedHourHeight(
@@ -151,6 +173,8 @@ public struct ZoomableDayTimelineView: View {
 	///   - initialEditingItemID: The `id` of an item to start already in edit mode, matching
 	///     `TimelineItem.id`. Defaults to `nil` (nothing starts in edit mode). Exposed mainly so
 	///     previews/tests/screenshots can capture edit mode without simulating a gesture.
+	///   - calendar: The calendar used for hour-range/snap/create-and-format logic. Defaults to
+	///     `Calendar.current`.
 	public init(
 		items: [TimelineItem],
 		hourHeight: Binding<CGFloat>,
@@ -160,7 +184,8 @@ public struct ZoomableDayTimelineView: View {
 		onDelete: ((TimelineItem) -> Void)? = nil,
 		onEditStart: ((TimelineItem) -> Void)? = nil,
 		onEditEnd: ((TimelineItem) -> Void)? = nil,
-		initialEditingItemID: UUID? = nil
+		initialEditingItemID: UUID? = nil,
+		calendar: Calendar = .current
 	) {
 		self.items = items
 		self.onSelect = onSelect
@@ -169,6 +194,7 @@ public struct ZoomableDayTimelineView: View {
 		self.onDelete = onDelete
 		self.onEditStart = onEditStart
 		self.onEditEnd = onEditEnd
+		self.calendar = calendar
 		self.externalHourHeight = hourHeight
 		_internalHourHeight = State(initialValue: hourHeight.wrappedValue)
 		_editingItemID = State(initialValue: initialEditingItemID)
@@ -194,6 +220,12 @@ public struct ZoomableDayTimelineView: View {
 	@State private var hasScrolledToInitialPosition = false
 	@State private var editingItemID: UUID?
 	@GestureState private var pinchScale: CGFloat = 1
+	/// Liveness-only signal for the pinch gesture, separate from `pinchScale`'s own value — a
+	/// magnified-then-released-back-toward-neutral pinch can legitimately pass back through `1`
+	/// mid-gesture, so `pinchScale == 1` isn't a safe "gesture ended" check the way it is for
+	/// `TimelineEventBlock`'s drag `@GestureState`s (which are optional and `nil` exactly when
+	/// idle). See the `.onChange(of: isPinching)` below.
+	@GestureState private var isPinching = false
 	#if os(macOS)
 		@GestureState private var createDragState: (start: CGFloat, current: CGFloat)?
 	#else
@@ -237,7 +269,6 @@ public struct ZoomableDayTimelineView: View {
 	}
 
 	private func initialAnchorHour() -> CGFloat {
-		let calendar = Calendar.current
 		guard let firstTimed = timedItems.first else {
 			let hour = calendar.component(.hour, from: baseDate)
 			return CGFloat(max(0, hour - 1))
@@ -282,7 +313,8 @@ public struct ZoomableDayTimelineView: View {
 									onEditStart: onEditStart,
 									onEditEnd: onEditEnd,
 									snapMinutes: snapMinutes(viewportHeight: viewportHeight),
-									editingItemID: $editingItemID
+									editingItemID: $editingItemID,
+									calendar: calendar
 								)
 							}
 
@@ -319,16 +351,30 @@ public struct ZoomableDayTimelineView: View {
 						scrollPosition.scrollTo(y: max(0, targetY))
 					}
 
-				// `.scrollDisabled` is only *attached* while actually needed (a block is in edit
-				// mode), not just given a `false` value the rest of the time, so a host that never
-				// enters edit mode gets a ScrollView with this modifier never applied at all.
-				if editingItemID != nil {
-					scrollableContent.scrollDisabled(true)
-				} else {
-					scrollableContent
-				}
+				// Always attached, driven by a plain `Bool` — not branched into an `if`/`else` that
+				// only attaches `.scrollDisabled(true)` in the editing case. Those two branches are
+				// different view *types* (`ScrollView` vs. `ModifiedContent<ScrollView, _>`), so
+				// every time `editingItemID` toggled between nil/non-nil, SwiftUI tore down and
+				// remounted the whole `ScrollView` as a "different" view — losing its live scroll
+				// offset (a visible jump) and remounting already `scrollDisabled`, un-scrollable
+				// until it toggled back. Driving the same modifier with a `Bool` keeps one stable
+				// view identity across edit-mode transitions, so neither happens.
+				scrollableContent.scrollDisabled(editingItemID != nil)
 			}
 			.padding(.vertical, 8)
+			// `TimelineItem` isn't `Equatable`, so this observes item ids (all the reset logic
+			// needs) rather than `items` itself.
+			.onChange(of: items.map(\.id)) { _, _ in
+				editingItemID = EditingItemReset.resolved(current: editingItemID, items: items)
+			}
+			// `@GestureState` auto-resets `isPinching` to `false` on any gesture termination,
+			// including cancellation (system interruption, backgrounding) where `.onEnded` never
+			// runs — the same safety net `TimelineEventBlock.clearActiveDragIfGestureEnded()` uses
+			// for `activeDrag`, generalized here so a cancelled pinch doesn't leave `activeAnchorHour`
+			// stuck non-nil for the next pinch to (incorrectly) reuse.
+			.onChange(of: isPinching) { _, isLive in
+				if !isLive { activeAnchorHour = nil }
+			}
 		}
 	}
 
@@ -336,6 +382,9 @@ public struct ZoomableDayTimelineView: View {
 		MagnificationGesture()
 			.updating($pinchScale) { value, state, _ in
 				state = value
+			}
+			.updating($isPinching) { _, state, _ in
+				state = true
 			}
 			.onChanged { value in
 				if activeAnchorHour == nil {
@@ -441,7 +490,6 @@ public struct ZoomableDayTimelineView: View {
 	/// by every value `snapMinutes(viewportHeight:)` can return, so the derived end is already
 	/// grid-aligned with no extra snap step needed.
 	private func commitCreate(startY: CGFloat, endY: CGFloat?, viewportHeight: CGFloat) {
-		let calendar = Calendar.current
 		let snapMinutesValue = snapMinutes(viewportHeight: viewportHeight)
 		let start = snappedDate(atY: startY, snapMinutesValue: snapMinutesValue, calendar: calendar)
 
@@ -465,7 +513,6 @@ public struct ZoomableDayTimelineView: View {
 		@ViewBuilder
 		private func createPreview(contentWidth: CGFloat, viewportHeight: CGFloat) -> some View {
 			if let createDragState {
-				let calendar = Calendar.current
 				let snapMinutesValue = snapMinutes(viewportHeight: viewportHeight)
 				let start = snappedDate(
 					atY: createDragState.start,
@@ -538,7 +585,6 @@ public struct ZoomableDayTimelineView: View {
 						.foregroundStyle(.secondary)
 						.frame(width: labelWidth, alignment: .trailing)
 						.padding(.trailing, 8)
-						.offset(y: -7)
 
 					Rectangle()
 						.fill(.quaternary)
@@ -553,7 +599,6 @@ public struct ZoomableDayTimelineView: View {
 	private func formatHour(_ hour: Int) -> String {
 		let formatter = DateFormatter()
 		formatter.dateFormat = "HH:mm"
-		let calendar = Calendar.current
 		let date = calendar.date(bySettingHour: hour, minute: 0, second: 0, of: Date()) ?? Date()
 		return formatter.string(from: date)
 	}

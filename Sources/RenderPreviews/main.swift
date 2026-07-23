@@ -175,6 +175,18 @@ let frenchMondayFirstCalendar: Calendar = {
 	return calendar
 }()
 
+/// A calendar in a distinctly different time zone from the device's — unlike
+/// `frenchMondayFirstCalendar` (which only differs in locale/first weekday, invisible in the day
+/// grid), this actually shifts where events render relative to the hour labels, so it visually
+/// proves `WeekTimelineView`'s `calendar` reaches the `ZoomableDayTimelineView` day grid
+/// underneath, not just `WeekStripView`.
+let tokyoCalendar: Calendar = {
+	var calendar = Calendar(identifier: .gregorian)
+	calendar.locale = Locale(identifier: "en_US_POSIX")
+	calendar.timeZone = TimeZone(identifier: "Asia/Tokyo")!
+	return calendar
+}()
+
 let previewScenarios: [(name: String, items: [TimelineItem], viewType: ViewType)] = [
 	("day-simple", sampleItems, .day),
 	("day-conflicts", conflictingItems, .day),
@@ -192,6 +204,10 @@ let previewScenarios: [(name: String, items: [TimelineItem], viewType: ViewType)
 		.weekStrip(selectedDate: weekPreviewSelectedDate, calendar: frenchMondayFirstCalendar)
 	),
 	("week-timeline-default", sampleItems, .weekTimeline(selectedDate: weekPreviewSelectedDate, calendar: .current)),
+	(
+		"week-timeline-calendar-tokyo", sampleItems,
+		.weekTimeline(selectedDate: weekPreviewSelectedDate, calendar: tokyoCalendar)
+	),
 	("compact-simple", sampleItems, .compact(.fixed(hours: 2), height: 132)),
 	("compact-conflicts", conflictingItems, .compact(.fixed(hours: 2), height: 132)),
 	("compact-many", manyItems, .compact(.fixed(hours: 2), height: 132)),

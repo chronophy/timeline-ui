@@ -9,6 +9,16 @@ enum EventPositionMath {
 	/// component matters: the `.hour` component alone discards `referenceDate`'s minutes, and
 	/// re-deriving the offset from a raw `timeIntervalSince(referenceDate)` delta then leaks
 	/// those discarded minutes back in as a fixed error applied to every event on the timeline.
+	///
+	/// `date`'s own hour/minute/second are read directly via `calendar.dateComponents(_:from:)`
+	/// (a single-date decomposition, not a diff) rather than via `timeIntervalSince`/
+	/// `Calendar.dateComponents(_:from:to:)`/`Calendar`'s duration-based `.hour`/`.minute`
+	/// addition — all of those measure real elapsed seconds, which is wrong by the DST offset on
+	/// transition days (a 16:00 event on a 23-hour "spring forward" day is only 15 real elapsed
+	/// hours after midnight). Reading `date`'s wall-clock fields directly sidesteps that; only the
+	/// whole-day offset between `referenceDate`'s day and `date`'s day (safe: `Calendar`'s `.day`
+	/// addition/diff is wall-clock-preserving, unlike its `.hour`/`.minute` addition) is derived
+	/// relative to `referenceDate`.
 	static func yOffset(
 		of date: Date,
 		referenceDate: Date,
@@ -16,15 +26,24 @@ enum EventPositionMath {
 		hourHeight: CGFloat,
 		calendar: Calendar
 	) -> CGFloat {
-		let startOfDay = calendar.startOfDay(for: referenceDate)
-		let hoursSinceStartOfDay = date.timeIntervalSince(startOfDay) / 3600.0
+		let startOfReferenceDay = calendar.startOfDay(for: referenceDate)
+		let startOfDateDay = calendar.startOfDay(for: date)
+		let daysBetween = calendar.dateComponents([.day], from: startOfReferenceDay, to: startOfDateDay).day ?? 0
+		let timeOfDay = calendar.dateComponents([.hour, .minute, .second], from: date)
+		let hoursSinceStartOfDay =
+			Double(daysBetween) * 24
+			+ Double(timeOfDay.hour ?? 0)
+			+ Double(timeOfDay.minute ?? 0) / 60.0
+			+ Double(timeOfDay.second ?? 0) / 3600.0
 		let hoursFromRangeStart = hoursSinceStartOfDay - Double(rangeStart)
 		return CGFloat(hoursFromRangeStart) * hourHeight
 	}
 
 	/// Exact inverse of `yOffset(of:referenceDate:rangeStart:hourHeight:calendar:)` — unsnapped,
 	/// by design (snapping is a separate, later step, same layering used throughout this file:
-	/// raw geometry math never snaps itself).
+	/// raw geometry math never snaps itself). Reconstructs via `calendar.date(bySettingHour:...)`
+	/// (wall-clock component assignment) rather than adding a raw duration, for the same DST
+	/// reason as `yOffset` above.
 	static func date(
 		atYOffset yOffset: CGFloat,
 		referenceDate: Date,
@@ -32,10 +51,17 @@ enum EventPositionMath {
 		hourHeight: CGFloat,
 		calendar: Calendar
 	) -> Date {
-		let hoursFromRangeStart = Double(yOffset / hourHeight)
-		let hoursSinceStartOfDay = hoursFromRangeStart + Double(rangeStart)
-		let startOfDay = calendar.startOfDay(for: referenceDate)
-		return startOfDay.addingTimeInterval(hoursSinceStartOfDay * 3600)
+		let totalHours = Double(yOffset / hourHeight) + Double(rangeStart)
+		let dayOffset = Int((totalHours / 24).rounded(.down))
+		let hoursIntoDay = totalHours - Double(dayOffset) * 24
+		let totalSecondsIntoDay = Int((hoursIntoDay * 3600).rounded())
+		let hours = totalSecondsIntoDay / 3600
+		let remainder = totalSecondsIntoDay % 3600
+		let minutes = remainder / 60
+		let seconds = remainder % 60
+		let startOfReferenceDay = calendar.startOfDay(for: referenceDate)
+		let targetDay = calendar.date(byAdding: .day, value: dayOffset, to: startOfReferenceDay) ?? startOfReferenceDay
+		return calendar.date(bySettingHour: hours, minute: minutes, second: seconds, of: targetDay) ?? referenceDate
 	}
 }
 
@@ -54,12 +80,39 @@ enum RescheduleMath {
 		}
 	}
 
+	/// `date`'s minute-of-day, read directly via `calendar.dateComponents(_:from:)` rather than a
+	/// diff against `startOfDay` — see the DST note on `date(atMinuteOfDay:near:calendar:)` below.
+	private static func minuteOfDay(of date: Date, calendar: Calendar) -> Int {
+		let components = calendar.dateComponents([.hour, .minute], from: date)
+		return (components.hour ?? 0) * 60 + (components.minute ?? 0)
+	}
+
+	/// Reconstructs a `Date` from a minute-of-day value — which may fall outside `0..<1440`,
+	/// rolling over into an adjacent day — relative to `date`'s own calendar day.
+	///
+	/// Built via wall-clock component assignment (`calendar.date(bySettingHour:minute:second:of:)`
+	/// for the in-day remainder, `Calendar`'s `.day` addition — verified wall-clock-preserving,
+	/// unlike its `.hour`/`.minute` addition — for any day rollover) rather than adding a raw
+	/// duration (`addingTimeInterval`, or `Calendar`'s own duration-based `.minute`/`.hour`
+	/// addition): both of those are wrong by the DST offset whenever `date`'s day has one.
+	private static func date(atMinuteOfDay minuteOfDay: Int, near date: Date, calendar: Calendar) -> Date {
+		let dayOffset = Int((Double(minuteOfDay) / 1440.0).rounded(.down))
+		let minutesIntoDay = minuteOfDay - dayOffset * 1440
+		let startOfDay = calendar.startOfDay(for: date)
+		let targetDay = calendar.date(byAdding: .day, value: dayOffset, to: startOfDay) ?? startOfDay
+		return calendar.date(
+			bySettingHour: minutesIntoDay / 60,
+			minute: minutesIntoDay % 60,
+			second: 0,
+			of: targetDay
+		) ?? date
+	}
+
 	static func snapped(_ date: Date, toNearestMinutes minutes: Int, calendar: Calendar) -> Date {
 		guard minutes > 0 else { return date }
-		let startOfDay = calendar.startOfDay(for: date)
-		let minutesSinceStartOfDay = date.timeIntervalSince(startOfDay) / 60
-		let roundedMinutes = (minutesSinceStartOfDay / Double(minutes)).rounded() * Double(minutes)
-		return calendar.date(byAdding: .minute, value: Int(roundedMinutes), to: startOfDay) ?? date
+		let current = minuteOfDay(of: date, calendar: calendar)
+		let rounded = Int((Double(current) / Double(minutes)).rounded() * Double(minutes))
+		return self.date(atMinuteOfDay: rounded, near: date, calendar: calendar)
 	}
 
 	/// Snaps only the resulting start; end is derived as `start + originalDuration` so a move
@@ -74,8 +127,12 @@ enum RescheduleMath {
 		calendar: Calendar
 	) -> (start: Date, end: Date) {
 		guard translationY != 0 else { return (originalStart, originalEnd) }
-		let minutesDelta = Double(translationY / hourHeight * 60)
-		let rawStart = originalStart.addingTimeInterval(minutesDelta * 60)
+		let minutesDelta = Int((translationY / hourHeight * 60).rounded())
+		let rawStart = date(
+			atMinuteOfDay: minuteOfDay(of: originalStart, calendar: calendar) + minutesDelta,
+			near: originalStart,
+			calendar: calendar
+		)
 		let snappedStart = snapped(rawStart, toNearestMinutes: snapMinutes, calendar: calendar)
 		let duration = originalEnd.timeIntervalSince(originalStart)
 		return (snappedStart, snappedStart.addingTimeInterval(duration))
@@ -94,8 +151,12 @@ enum RescheduleMath {
 		calendar: Calendar
 	) -> Date {
 		guard translationY != 0 else { return originalStart }
-		let minutesDelta = Double(translationY / hourHeight * 60)
-		let rawStart = originalStart.addingTimeInterval(minutesDelta * 60)
+		let minutesDelta = Int((translationY / hourHeight * 60).rounded())
+		let rawStart = date(
+			atMinuteOfDay: minuteOfDay(of: originalStart, calendar: calendar) + minutesDelta,
+			near: originalStart,
+			calendar: calendar
+		)
 		let snappedStart = snapped(rawStart, toNearestMinutes: snapMinutes, calendar: calendar)
 		let minDuration = min(Double(snapMinutes) * 60, originalEnd.timeIntervalSince(originalStart))
 		let latestAllowedStart = originalEnd.addingTimeInterval(-minDuration)
@@ -111,8 +172,12 @@ enum RescheduleMath {
 		calendar: Calendar
 	) -> Date {
 		guard translationY != 0 else { return originalEnd }
-		let minutesDelta = Double(translationY / hourHeight * 60)
-		let rawEnd = originalEnd.addingTimeInterval(minutesDelta * 60)
+		let minutesDelta = Int((translationY / hourHeight * 60).rounded())
+		let rawEnd = date(
+			atMinuteOfDay: minuteOfDay(of: originalEnd, calendar: calendar) + minutesDelta,
+			near: originalEnd,
+			calendar: calendar
+		)
 		let snappedEnd = snapped(rawEnd, toNearestMinutes: snapMinutes, calendar: calendar)
 		let minDuration = min(Double(snapMinutes) * 60, originalEnd.timeIntervalSince(originalStart))
 		let earliestAllowedEnd = originalStart.addingTimeInterval(minDuration)
@@ -174,6 +239,52 @@ struct TimelineEventBlock: View {
 	let onEditEnd: ((TimelineItem) -> Void)?
 	let snapMinutes: Int
 	@Binding var editingItemID: UUID?
+	/// The calendar used for positioning (`EventPositionMath`) and drag/resize snapping
+	/// (`RescheduleMath`). Defaults to `.current` for callers (like `DayTimelineView`) that don't
+	/// have a calendar concept of their own; `ZoomableDayTimelineView` threads its own stored
+	/// `calendar` through here so a block's rendered position and drag snapping stay consistent
+	/// with the day grid it's drawn on, rather than silently reverting to `Calendar.current`.
+	let calendar: Calendar
+
+	/// A stored property with a default value (`= .current`) is excluded from the synthesized
+	/// memberwise init entirely, rather than becoming an optional-but-still-overridable
+	/// parameter — so an explicit init is needed here to let `DayTimelineView` keep omitting
+	/// `calendar:` while `ZoomableDayTimelineView` explicitly passes its own.
+	init(
+		item: TimelineItem,
+		column: Int,
+		totalColumns: Int,
+		hourHeight: CGFloat,
+		rangeStart: Int,
+		baseDate: Date,
+		labelWidth: CGFloat,
+		contentWidth: CGFloat,
+		onSelect: ((TimelineItem) -> Void)?,
+		onReschedule: ((TimelineItem) -> Void)?,
+		onDelete: ((TimelineItem) -> Void)?,
+		onEditStart: ((TimelineItem) -> Void)?,
+		onEditEnd: ((TimelineItem) -> Void)?,
+		snapMinutes: Int,
+		editingItemID: Binding<UUID?>,
+		calendar: Calendar = .current
+	) {
+		self.item = item
+		self.column = column
+		self.totalColumns = totalColumns
+		self.hourHeight = hourHeight
+		self.rangeStart = rangeStart
+		self.baseDate = baseDate
+		self.labelWidth = labelWidth
+		self.contentWidth = contentWidth
+		self.onSelect = onSelect
+		self.onReschedule = onReschedule
+		self.onDelete = onDelete
+		self.onEditStart = onEditStart
+		self.onEditEnd = onEditEnd
+		self.snapMinutes = snapMinutes
+		self._editingItemID = editingItemID
+		self.calendar = calendar
+	}
 
 	private enum DragMode: Equatable {
 		case move
@@ -208,8 +319,19 @@ struct TimelineEventBlock: View {
 		isRescheduleEnabled || isDeleteEnabled
 	}
 
+	/// True while this block is the current shared edit target, *or* while its own gesture is
+	/// still physically live — the latter matters because `editingItemID` can move to a different
+	/// block mid-gesture (a second touch tapping another block while this one is still being
+	/// dragged/resized). `isEditing` gates which gesture shape `cardGesture()` attaches
+	/// (`dragGesture` vs. the long-press-gated `entryGesture`) and whether the resize handles stay
+	/// in the view tree; if it flipped to `false` the instant `editingItemID` moved away, the
+	/// attached gesture would swap (or the handle views carrying a live resize gesture would be
+	/// removed) mid-recognition, which SwiftUI cancels outright — silently discarding the drag
+	/// before its `.onEnded` (and so `onReschedule`) ever fires. Keeping `isEditing` true until the
+	/// gesture itself concludes lets it finish and commit normally regardless of where
+	/// `editingItemID` has moved on to in the meantime.
 	private var isEditing: Bool {
-		canEnterEditMode && editingItemID == item.id
+		(canEnterEditMode && editingItemID == item.id) || isGestureLive
 	}
 
 	// MARK: - Committed (non-live) geometry — never fed by an in-progress drag, so a view's own
@@ -232,7 +354,7 @@ struct TimelineEventBlock: View {
 			referenceDate: baseDate,
 			rangeStart: rangeStart,
 			hourHeight: hourHeight,
-			calendar: .current
+			calendar: calendar
 		)
 	}
 
@@ -341,7 +463,12 @@ struct TimelineEventBlock: View {
 		.onChange(of: item.startDate) { pendingReschedule = nil }
 		.onChange(of: item.endDate) { pendingReschedule = nil }
 		.onChange(of: editingItemID) { oldValue, newValue in
-			if newValue != item.id { activeDrag = nil }
+			// Only tear down a *stale* activeDrag here — never one whose gesture is still
+			// physically live. Without this, a second touch elsewhere (e.g. tapping block B while
+			// still mid-drag on block A on iPad) would silently abandon A's in-progress move: the
+			// shared `editingItemID` binding changing away from A fires this `.onChange` on every
+			// sibling, including A itself, and A's own gesture is still running.
+			if newValue != item.id && !isGestureLive { activeDrag = nil }
 			if newValue == item.id && oldValue != item.id {
 				onEditStart?(committedItem)
 			}
@@ -350,6 +477,9 @@ struct TimelineEventBlock: View {
 					editEndFiredByDelete = false
 				} else {
 					onEditEnd?(committedItem)
+					if let pendingReschedule {
+						revertPendingRescheduleAfterTimeout(expecting: pendingReschedule)
+					}
 				}
 			}
 		}
@@ -382,16 +512,24 @@ struct TimelineEventBlock: View {
 
 		return ZStack {
 			visible
-			// `.highPriorityGesture` isn't needed on iOS: a long-press's own timing already
-			// doesn't compete with scrolling/pinching, and once actually dragging,
-			// `.scrollDisabled(editingItemID != nil)` (see `ZoomableDayTimelineView`) already
-			// locks scroll out — whereas attaching it universally risked claiming one of the two
-			// touches a pinch-to-zoom gesture needs, breaking pinch on touch devices.
-			#if os(macOS)
-				gestureZone.highPriorityGesture(cardGesture())
-			#else
-				gestureZone.gesture(cardGesture())
-			#endif
+			// Only attached when this block can actually do something with a touch — no `onSelect`
+			// and no edit capability means nothing here would ever act on a tap or drag anyway, so
+			// the gesture recognizer itself is skipped rather than installed-but-inert. Otherwise a
+			// read-only block sitting inside a parent with its own tap gesture, or inside a
+			// `ScrollView`, would claim the touch and prevent it from reaching that ancestor —
+			// silently, since nothing would visibly happen here either way.
+			if onSelect != nil || canEnterEditMode {
+				// `.highPriorityGesture` isn't needed on iOS: a long-press's own timing already
+				// doesn't compete with scrolling/pinching, and once actually dragging,
+				// `.scrollDisabled(editingItemID != nil)` (see `ZoomableDayTimelineView`) already
+				// locks scroll out — whereas attaching it universally risked claiming one of the two
+				// touches a pinch-to-zoom gesture needs, breaking pinch on touch devices.
+				#if os(macOS)
+					gestureZone.highPriorityGesture(cardGesture())
+				#else
+					gestureZone.gesture(cardGesture())
+				#endif
+			}
 		}
 	}
 
@@ -625,6 +763,30 @@ struct TimelineEventBlock: View {
 		onReschedule?(item.rescheduled(startDate: dates.start, endDate: dates.end))
 	}
 
+	/// Bounds how long an optimistic `pendingReschedule` can diverge from `item`'s authoritative
+	/// dates once the *editing session* ends, if the host silently declines to persist it — i.e.
+	/// never returns an updated `items` array, so the `.onChange(of: item.startDate/endDate)`
+	/// handlers above never fire. Without this, a rejected reschedule would leave the block
+	/// visually pinned at the rejected position indefinitely, with no indication the change wasn't
+	/// actually persisted.
+	///
+	/// Armed once, from the `.onChange(of: editingItemID)` exit branch below (alongside
+	/// `onEditEnd`) — deliberately *not* from `commitDrag` after every individual drag. A host is
+	/// documented (see `onEditEnd`'s doc comment) as free to defer persisting until the whole
+	/// session ends rather than after each `onReschedule`; arming per-drag would fire this revert
+	/// while the user is still mid-session (e.g. between dragging the start handle and the end
+	/// handle), yanking the block back under them.
+	private static let pendingRescheduleTimeout: Duration = .seconds(3)
+
+	private func revertPendingRescheduleAfterTimeout(expecting dates: (start: Date, end: Date)) {
+		Task {
+			try? await Task.sleep(for: Self.pendingRescheduleTimeout)
+			if let current = pendingReschedule, current.start == dates.start, current.end == dates.end {
+				pendingReschedule = nil
+			}
+		}
+	}
+
 	private func resolvedDates(mode: DragMode, originalStart: Date, originalEnd: Date, translationY: CGFloat) -> (
 		start: Date, end: Date
 	) {
@@ -636,7 +798,7 @@ struct TimelineEventBlock: View {
 				translationY: translationY,
 				hourHeight: hourHeight,
 				snapMinutes: snapMinutes,
-				calendar: .current
+				calendar: calendar
 			)
 		case .resizeStart:
 			let newStart = RescheduleMath.resizedStart(
@@ -645,7 +807,7 @@ struct TimelineEventBlock: View {
 				translationY: translationY,
 				hourHeight: hourHeight,
 				snapMinutes: snapMinutes,
-				calendar: .current
+				calendar: calendar
 			)
 			return (newStart, originalEnd)
 		case .resizeEnd:
@@ -655,18 +817,26 @@ struct TimelineEventBlock: View {
 				translationY: translationY,
 				hourHeight: hourHeight,
 				snapMinutes: snapMinutes,
-				calendar: .current
+				calendar: calendar
 			)
 			return (originalStart, newEnd)
 		}
+	}
+
+	/// Whether one of this block's own drag/resize gestures is physically in progress right now —
+	/// i.e. at least one `@GestureState` is still live. Distinct from `activeDrag` (`@State`,
+	/// doesn't auto-reset): this is the ground truth a gesture is actually still touching the
+	/// screen, used both to know when it's safe to clear `activeDrag` after a real termination and
+	/// to avoid clearing it out from under a gesture that's still live.
+	private var isGestureLive: Bool {
+		moveDragState != nil || resizeStartDragState != nil || resizeEndDragState != nil
 	}
 
 	/// `@GestureState` auto-resets to `nil` on any gesture termination, including system
 	/// cancellation (call interruption, app backgrounding) where `.onEnded` never fires — this is
 	/// the safety net that guarantees `activeDrag` doesn't get stuck non-nil in that case.
 	private func clearActiveDragIfGestureEnded() {
-		let anyLive = moveDragState != nil || resizeStartDragState != nil || resizeEndDragState != nil
-		if !anyLive {
+		if !isGestureLive {
 			activeDrag = nil
 		}
 	}

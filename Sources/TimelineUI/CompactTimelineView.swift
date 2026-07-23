@@ -120,6 +120,13 @@ public struct CompactTimelineView: View {
 					compactEventBlock(layoutItem: layoutItem, range: range, contentWidth: contentWidth)
 				}
 			}
+			// Top padding keeps the first hour line clear of the container's rounded top edge —
+			// without it, the line (and its now-unclipped label, since the label no longer overlaps
+			// it with a compensating negative offset) sits close enough to read as touching the
+			// border, especially since both are close in color (`.quaternary` vs. the page
+			// background). Applied to the same container as `hourLines`/the event blocks, not just
+			// the label, so the grid and event positions shift down together and stay aligned.
+			.padding(.top, 8)
 			.padding(.horizontal, 8)
 		}
 	}
@@ -140,6 +147,8 @@ public struct CompactTimelineView: View {
 				}
 			}
 		}
+		// See the matching comment in `flexibleBody`.
+		.padding(.top, 8)
 		.padding(.horizontal, 8)
 		.frame(height: CGFloat(normalizedHours + 1) * hourHeight)
 	}
@@ -228,7 +237,6 @@ public struct CompactTimelineView: View {
 						.foregroundStyle(.secondary)
 						.frame(width: labelWidth, alignment: .trailing)
 						.padding(.trailing, 8)
-						.offset(y: -7)
 
 					Rectangle()
 						.fill(.quaternary)
