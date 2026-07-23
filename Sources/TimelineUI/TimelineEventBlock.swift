@@ -415,6 +415,9 @@ struct TimelineEventBlock: View {
 					editEndFiredByDelete = false
 				} else {
 					onEditEnd?(committedItem)
+					if let pendingReschedule {
+						revertPendingRescheduleAfterTimeout(expecting: pendingReschedule)
+					}
 				}
 			}
 		}
@@ -688,6 +691,30 @@ struct TimelineEventBlock: View {
 		guard dates.start != activeDrag.originalStart || dates.end != activeDrag.originalEnd else { return }
 		pendingReschedule = dates
 		onReschedule?(item.rescheduled(startDate: dates.start, endDate: dates.end))
+	}
+
+	/// Bounds how long an optimistic `pendingReschedule` can diverge from `item`'s authoritative
+	/// dates once the *editing session* ends, if the host silently declines to persist it — i.e.
+	/// never returns an updated `items` array, so the `.onChange(of: item.startDate/endDate)`
+	/// handlers above never fire. Without this, a rejected reschedule would leave the block
+	/// visually pinned at the rejected position indefinitely, with no indication the change wasn't
+	/// actually persisted.
+	///
+	/// Armed once, from the `.onChange(of: editingItemID)` exit branch below (alongside
+	/// `onEditEnd`) — deliberately *not* from `commitDrag` after every individual drag. A host is
+	/// documented (see `onEditEnd`'s doc comment) as free to defer persisting until the whole
+	/// session ends rather than after each `onReschedule`; arming per-drag would fire this revert
+	/// while the user is still mid-session (e.g. between dragging the start handle and the end
+	/// handle), yanking the block back under them.
+	private static let pendingRescheduleTimeout: Duration = .seconds(3)
+
+	private func revertPendingRescheduleAfterTimeout(expecting dates: (start: Date, end: Date)) {
+		Task {
+			try? await Task.sleep(for: Self.pendingRescheduleTimeout)
+			if let current = pendingReschedule, current.start == dates.start, current.end == dates.end {
+				pendingReschedule = nil
+			}
+		}
 	}
 
 	private func resolvedDates(mode: DragMode, originalStart: Date, originalEnd: Date, translationY: CGFloat) -> (
