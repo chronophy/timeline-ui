@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## [1.3.1] - 2026-07-23
+
+### Fixed
+
+- Entering edit mode on macOS now requires a double-click instead of a single click, preventing accidental drags when clicking through several events
+
 ## [1.3.0] - 2026-07-23
 
 ### Added
@@ -62,6 +68,7 @@ Initial release.
 - `TimelineUIEventKit` module for `EKEvent` ↔ `TimelineItem` conversion
 - DocC documentation and a `RenderPreviews` CLI for generating preview screenshots
 
+[1.3.1]: https://github.com/chronophy/timeline-ui/releases/tag/1.3.1
 [1.3.0]: https://github.com/chronophy/timeline-ui/releases/tag/1.3.0
 [1.2.0]: https://github.com/chronophy/timeline-ui/releases/tag/1.2.0
 [1.1.0]: https://github.com/CleanCocoa/timeline-ui/releases/tag/1.1.0
