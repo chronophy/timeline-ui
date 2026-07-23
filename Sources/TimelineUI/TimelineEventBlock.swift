@@ -273,8 +273,19 @@ struct TimelineEventBlock: View {
 		isRescheduleEnabled || isDeleteEnabled
 	}
 
+	/// True while this block is the current shared edit target, *or* while its own gesture is
+	/// still physically live — the latter matters because `editingItemID` can move to a different
+	/// block mid-gesture (a second touch tapping another block while this one is still being
+	/// dragged/resized). `isEditing` gates which gesture shape `cardGesture()` attaches
+	/// (`dragGesture` vs. the long-press-gated `entryGesture`) and whether the resize handles stay
+	/// in the view tree; if it flipped to `false` the instant `editingItemID` moved away, the
+	/// attached gesture would swap (or the handle views carrying a live resize gesture would be
+	/// removed) mid-recognition, which SwiftUI cancels outright — silently discarding the drag
+	/// before its `.onEnded` (and so `onReschedule`) ever fires. Keeping `isEditing` true until the
+	/// gesture itself concludes lets it finish and commit normally regardless of where
+	/// `editingItemID` has moved on to in the meantime.
 	private var isEditing: Bool {
-		canEnterEditMode && editingItemID == item.id
+		(canEnterEditMode && editingItemID == item.id) || isGestureLive
 	}
 
 	// MARK: - Committed (non-live) geometry — never fed by an in-progress drag, so a view's own
@@ -406,7 +417,12 @@ struct TimelineEventBlock: View {
 		.onChange(of: item.startDate) { pendingReschedule = nil }
 		.onChange(of: item.endDate) { pendingReschedule = nil }
 		.onChange(of: editingItemID) { oldValue, newValue in
-			if newValue != item.id { activeDrag = nil }
+			// Only tear down a *stale* activeDrag here — never one whose gesture is still
+			// physically live. Without this, a second touch elsewhere (e.g. tapping block B while
+			// still mid-drag on block A on iPad) would silently abandon A's in-progress move: the
+			// shared `editingItemID` binding changing away from A fires this `.onChange` on every
+			// sibling, including A itself, and A's own gesture is still running.
+			if newValue != item.id && !isGestureLive { activeDrag = nil }
 			if newValue == item.id && oldValue != item.id {
 				onEditStart?(committedItem)
 			}
@@ -753,12 +769,20 @@ struct TimelineEventBlock: View {
 		}
 	}
 
+	/// Whether one of this block's own drag/resize gestures is physically in progress right now —
+	/// i.e. at least one `@GestureState` is still live. Distinct from `activeDrag` (`@State`,
+	/// doesn't auto-reset): this is the ground truth a gesture is actually still touching the
+	/// screen, used both to know when it's safe to clear `activeDrag` after a real termination and
+	/// to avoid clearing it out from under a gesture that's still live.
+	private var isGestureLive: Bool {
+		moveDragState != nil || resizeStartDragState != nil || resizeEndDragState != nil
+	}
+
 	/// `@GestureState` auto-resets to `nil` on any gesture termination, including system
 	/// cancellation (call interruption, app backgrounding) where `.onEnded` never fires — this is
 	/// the safety net that guarantees `activeDrag` doesn't get stuck non-nil in that case.
 	private func clearActiveDragIfGestureEnded() {
-		let anyLive = moveDragState != nil || resizeStartDragState != nil || resizeEndDragState != nil
-		if !anyLive {
+		if !isGestureLive {
 			activeDrag = nil
 		}
 	}
