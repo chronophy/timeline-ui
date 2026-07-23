@@ -220,6 +220,12 @@ public struct ZoomableDayTimelineView: View {
 	@State private var hasScrolledToInitialPosition = false
 	@State private var editingItemID: UUID?
 	@GestureState private var pinchScale: CGFloat = 1
+	/// Liveness-only signal for the pinch gesture, separate from `pinchScale`'s own value — a
+	/// magnified-then-released-back-toward-neutral pinch can legitimately pass back through `1`
+	/// mid-gesture, so `pinchScale == 1` isn't a safe "gesture ended" check the way it is for
+	/// `TimelineEventBlock`'s drag `@GestureState`s (which are optional and `nil` exactly when
+	/// idle). See the `.onChange(of: isPinching)` below.
+	@GestureState private var isPinching = false
 	#if os(macOS)
 		@GestureState private var createDragState: (start: CGFloat, current: CGFloat)?
 	#else
@@ -360,6 +366,14 @@ public struct ZoomableDayTimelineView: View {
 			.onChange(of: items.map(\.id)) { _, _ in
 				editingItemID = EditingItemReset.resolved(current: editingItemID, items: items)
 			}
+			// `@GestureState` auto-resets `isPinching` to `false` on any gesture termination,
+			// including cancellation (system interruption, backgrounding) where `.onEnded` never
+			// runs — the same safety net `TimelineEventBlock.clearActiveDragIfGestureEnded()` uses
+			// for `activeDrag`, generalized here so a cancelled pinch doesn't leave `activeAnchorHour`
+			// stuck non-nil for the next pinch to (incorrectly) reuse.
+			.onChange(of: isPinching) { _, isLive in
+				if !isLive { activeAnchorHour = nil }
+			}
 		}
 	}
 
@@ -367,6 +381,9 @@ public struct ZoomableDayTimelineView: View {
 		MagnificationGesture()
 			.updating($pinchScale) { value, state, _ in
 				state = value
+			}
+			.updating($isPinching) { _, state, _ in
+				state = true
 			}
 			.onChanged { value in
 				if activeAnchorHour == nil {
