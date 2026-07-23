@@ -538,7 +538,6 @@ public struct ZoomableDayTimelineView: View {
 						.foregroundStyle(.secondary)
 						.frame(width: labelWidth, alignment: .trailing)
 						.padding(.trailing, 8)
-						.offset(y: -7)
 
 					Rectangle()
 						.fill(.quaternary)
