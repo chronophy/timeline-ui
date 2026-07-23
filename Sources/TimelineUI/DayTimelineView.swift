@@ -1,5 +1,28 @@
 import SwiftUI
 
+/// Pure, testable math for converting a date into an hour index relative to another date's
+/// calendar day — used to size the visible hour range.
+enum HourRangeMath {
+	/// `date`'s hour-of-day, plus 24 per calendar day between `baseDate`'s day and `date`'s day.
+	///
+	/// Keeps `baseDate`'s own minutes out of the calculation entirely, unlike combining its
+	/// `.hour` component (which discards them) with a raw `timeIntervalSince(baseDate)` delta
+	/// (which doesn't) — that mismatch leaks `baseDate`'s discarded minutes back in as an error
+	/// that then gets truncated away by the `Int(...)` conversion, under-bounding the computed
+	/// range. E.g. `baseDate` at 09:05 with another item at 10:00: the old computation truncated
+	/// `(10:00-09:05)/3600` to `0`, yielding hour `9` instead of `10`.
+	static func hoursSinceBase(_ date: Date, baseDate: Date, calendar: Calendar) -> Int {
+		let dateHour = calendar.component(.hour, from: date)
+		let daysBetween =
+			calendar.dateComponents(
+				[.day],
+				from: calendar.startOfDay(for: baseDate),
+				to: calendar.startOfDay(for: date)
+			).day ?? 0
+		return dateHour + daysBetween * 24
+	}
+}
+
 /// A full-day timeline view with an hour grid.
 ///
 /// Use `DayTimelineView` to display a complete daily schedule. The view automatically
@@ -95,10 +118,7 @@ public struct DayTimelineView: View {
 	}
 
 	private func hoursSinceBase(_ date: Date) -> Int {
-		let calendar = Calendar.current
-		let baseHour = calendar.component(.hour, from: baseDate)
-		let hours = Int(date.timeIntervalSince(baseDate) / 3600)
-		return baseHour + hours
+		HourRangeMath.hoursSinceBase(date, baseDate: baseDate, calendar: Calendar.current)
 	}
 
 	public var body: some View {
