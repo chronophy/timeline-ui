@@ -313,7 +313,8 @@ public struct ZoomableDayTimelineView: View {
 									onEditStart: onEditStart,
 									onEditEnd: onEditEnd,
 									snapMinutes: snapMinutes(viewportHeight: viewportHeight),
-									editingItemID: $editingItemID
+									editingItemID: $editingItemID,
+									calendar: calendar
 								)
 							}
 

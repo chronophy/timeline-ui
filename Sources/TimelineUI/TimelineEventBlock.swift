@@ -239,6 +239,52 @@ struct TimelineEventBlock: View {
 	let onEditEnd: ((TimelineItem) -> Void)?
 	let snapMinutes: Int
 	@Binding var editingItemID: UUID?
+	/// The calendar used for positioning (`EventPositionMath`) and drag/resize snapping
+	/// (`RescheduleMath`). Defaults to `.current` for callers (like `DayTimelineView`) that don't
+	/// have a calendar concept of their own; `ZoomableDayTimelineView` threads its own stored
+	/// `calendar` through here so a block's rendered position and drag snapping stay consistent
+	/// with the day grid it's drawn on, rather than silently reverting to `Calendar.current`.
+	let calendar: Calendar
+
+	/// A stored property with a default value (`= .current`) is excluded from the synthesized
+	/// memberwise init entirely, rather than becoming an optional-but-still-overridable
+	/// parameter — so an explicit init is needed here to let `DayTimelineView` keep omitting
+	/// `calendar:` while `ZoomableDayTimelineView` explicitly passes its own.
+	init(
+		item: TimelineItem,
+		column: Int,
+		totalColumns: Int,
+		hourHeight: CGFloat,
+		rangeStart: Int,
+		baseDate: Date,
+		labelWidth: CGFloat,
+		contentWidth: CGFloat,
+		onSelect: ((TimelineItem) -> Void)?,
+		onReschedule: ((TimelineItem) -> Void)?,
+		onDelete: ((TimelineItem) -> Void)?,
+		onEditStart: ((TimelineItem) -> Void)?,
+		onEditEnd: ((TimelineItem) -> Void)?,
+		snapMinutes: Int,
+		editingItemID: Binding<UUID?>,
+		calendar: Calendar = .current
+	) {
+		self.item = item
+		self.column = column
+		self.totalColumns = totalColumns
+		self.hourHeight = hourHeight
+		self.rangeStart = rangeStart
+		self.baseDate = baseDate
+		self.labelWidth = labelWidth
+		self.contentWidth = contentWidth
+		self.onSelect = onSelect
+		self.onReschedule = onReschedule
+		self.onDelete = onDelete
+		self.onEditStart = onEditStart
+		self.onEditEnd = onEditEnd
+		self.snapMinutes = snapMinutes
+		self._editingItemID = editingItemID
+		self.calendar = calendar
+	}
 
 	private enum DragMode: Equatable {
 		case move
@@ -308,7 +354,7 @@ struct TimelineEventBlock: View {
 			referenceDate: baseDate,
 			rangeStart: rangeStart,
 			hourHeight: hourHeight,
-			calendar: .current
+			calendar: calendar
 		)
 	}
 
@@ -752,7 +798,7 @@ struct TimelineEventBlock: View {
 				translationY: translationY,
 				hourHeight: hourHeight,
 				snapMinutes: snapMinutes,
-				calendar: .current
+				calendar: calendar
 			)
 		case .resizeStart:
 			let newStart = RescheduleMath.resizedStart(
@@ -761,7 +807,7 @@ struct TimelineEventBlock: View {
 				translationY: translationY,
 				hourHeight: hourHeight,
 				snapMinutes: snapMinutes,
-				calendar: .current
+				calendar: calendar
 			)
 			return (newStart, originalEnd)
 		case .resizeEnd:
@@ -771,7 +817,7 @@ struct TimelineEventBlock: View {
 				translationY: translationY,
 				hourHeight: hourHeight,
 				snapMinutes: snapMinutes,
-				calendar: .current
+				calendar: calendar
 			)
 			return (originalStart, newEnd)
 		}
