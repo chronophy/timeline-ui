@@ -466,16 +466,24 @@ struct TimelineEventBlock: View {
 
 		return ZStack {
 			visible
-			// `.highPriorityGesture` isn't needed on iOS: a long-press's own timing already
-			// doesn't compete with scrolling/pinching, and once actually dragging,
-			// `.scrollDisabled(editingItemID != nil)` (see `ZoomableDayTimelineView`) already
-			// locks scroll out — whereas attaching it universally risked claiming one of the two
-			// touches a pinch-to-zoom gesture needs, breaking pinch on touch devices.
-			#if os(macOS)
-				gestureZone.highPriorityGesture(cardGesture())
-			#else
-				gestureZone.gesture(cardGesture())
-			#endif
+			// Only attached when this block can actually do something with a touch — no `onSelect`
+			// and no edit capability means nothing here would ever act on a tap or drag anyway, so
+			// the gesture recognizer itself is skipped rather than installed-but-inert. Otherwise a
+			// read-only block sitting inside a parent with its own tap gesture, or inside a
+			// `ScrollView`, would claim the touch and prevent it from reaching that ancestor —
+			// silently, since nothing would visibly happen here either way.
+			if onSelect != nil || canEnterEditMode {
+				// `.highPriorityGesture` isn't needed on iOS: a long-press's own timing already
+				// doesn't compete with scrolling/pinching, and once actually dragging,
+				// `.scrollDisabled(editingItemID != nil)` (see `ZoomableDayTimelineView`) already
+				// locks scroll out — whereas attaching it universally risked claiming one of the two
+				// touches a pinch-to-zoom gesture needs, breaking pinch on touch devices.
+				#if os(macOS)
+					gestureZone.highPriorityGesture(cardGesture())
+				#else
+					gestureZone.gesture(cardGesture())
+				#endif
+			}
 		}
 	}
 
