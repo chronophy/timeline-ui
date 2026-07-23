@@ -18,6 +18,21 @@ enum ZoomAnchor {
 	}
 }
 
+/// Pure, testable logic for clearing a stale `editingItemID`.
+///
+/// `ZoomableDayTimelineView` keeps a stable identity as `WeekTimelineView` pages between days (so
+/// scroll/zoom position persists), which means `editingItemID` isn't automatically reset when
+/// `items` is swapped for a new day's events. A leftover id matching nothing in the new day's
+/// `items` wouldn't show any edit UI (nothing matches it), but `scrollDisabled` is gated purely on
+/// `editingItemID != nil`, so scroll would stay frozen with no visible cause and no way to
+/// un-freeze it short of the id happening to be reused.
+enum EditingItemReset {
+	static func resolved(current: UUID?, items: [TimelineItem]) -> UUID? {
+		guard let current, items.contains(where: { $0.id == current }) else { return nil }
+		return current
+	}
+}
+
 /// A full-day timeline view with pinch-to-zoom on the hour grid.
 ///
 /// Unlike ``DayTimelineView``, which shrinks or expands the visible hour range to
@@ -319,16 +334,22 @@ public struct ZoomableDayTimelineView: View {
 						scrollPosition.scrollTo(y: max(0, targetY))
 					}
 
-				// `.scrollDisabled` is only *attached* while actually needed (a block is in edit
-				// mode), not just given a `false` value the rest of the time, so a host that never
-				// enters edit mode gets a ScrollView with this modifier never applied at all.
-				if editingItemID != nil {
-					scrollableContent.scrollDisabled(true)
-				} else {
-					scrollableContent
-				}
+				// Always attached, driven by a plain `Bool` — not branched into an `if`/`else` that
+				// only attaches `.scrollDisabled(true)` in the editing case. Those two branches are
+				// different view *types* (`ScrollView` vs. `ModifiedContent<ScrollView, _>`), so
+				// every time `editingItemID` toggled between nil/non-nil, SwiftUI tore down and
+				// remounted the whole `ScrollView` as a "different" view — losing its live scroll
+				// offset (a visible jump) and remounting already `scrollDisabled`, un-scrollable
+				// until it toggled back. Driving the same modifier with a `Bool` keeps one stable
+				// view identity across edit-mode transitions, so neither happens.
+				scrollableContent.scrollDisabled(editingItemID != nil)
 			}
 			.padding(.vertical, 8)
+			// `TimelineItem` isn't `Equatable`, so this observes item ids (all the reset logic
+			// needs) rather than `items` itself.
+			.onChange(of: items.map(\.id)) { _, _ in
+				editingItemID = EditingItemReset.resolved(current: editingItemID, items: items)
+			}
 		}
 	}
 
